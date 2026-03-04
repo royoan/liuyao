@@ -1,0 +1,629 @@
+from typing import List, Tuple, Optional, Set
+import yaml
+
+
+
+'''
+该文件定义了六爻预测的基本 类：
+GuaYao         卦爻每一爻的属性
+ChongGua       重卦
+FiveElements   五行
+EarthlyBranch  地支
+'''
+
+class GuaYao():
+    '''
+    重卦中的每一爻的信息封装
+    '''
+    def __init__(self, yao_index: int, yinyang: int, liuqin: str, dizhi: str, wuxing: str):
+        '''
+        :param yao_index: 爻序号(从下往上, 从1开始)
+        :param yinyang: 爻的阴阳(1表示阳爻，0表示阴爻)
+        :param chonggua: 卦对象
+        '''
+        self.yao_index = yao_index
+        self.yinyang = yinyang  # 1:阳爻, 0:阴爻
+        self.liuqin = liuqin    # 父母，兄弟，子孙，妻财，官鬼
+        self.dizhi = dizhi    # 地支
+        self.wuxing = wuxing  # 五行    
+        # self.chonggua = chonggua  #这里存储重卦对象，方便获取其整个重卦的信息
+        self.shiyao = 0      #是否 世爻
+        self.yingyao = 0     #是否 应爻
+        self.yongshen = 0    #是否 用神
+        self.dongyao = 0     #是否 动爻, 默认不是
+        self.bianyao = None  #如果是动爻，就有变爻
+
+        self.yuanshen = 0    #是否元神  （生 用神的爻）
+        self.jishen = 0      #是否忌神  （生 用神的爻）
+        self.choushen = 0    #是否仇神  （生 用神的爻）
+        self.sishiwangxiang = ""      #爻五行 在月建的 四时旺相,"旺,相,休,囚,死"
+        
+        self.month_score = (0.0, [])   # 月建 得分
+        self.day_score = (0.0, [])     # 日辰 得分
+        self.dongyao_score = (0.0, [])  # 动爻 得分
+
+        self.__init_name()
+
+    def __init_name(self):
+        '''爻辞中的，六、九分别代表阴、阳， 六三、九二后面的数字代表的是从下到上，以此爻的顺序位置'''
+        yinyang_name = "九" if self.yinyang == 1 else "六"
+        if self.yao_index == 1:
+            self.name = f"初{yinyang_name}"
+        elif self.yao_index == 2:
+            self.name = f"{yinyang_name}二"
+        elif self.yao_index == 3:
+            self.name = f"{yinyang_name}三"
+        elif self.yao_index == 4:
+            self.name = f"{yinyang_name}四"
+        elif self.yao_index == 5:
+            self.name = f"{yinyang_name}五"
+        elif self.yao_index == 6:
+            self.name = f"上{yinyang_name}"
+
+    def set_shiyao(self, shiyao: int = 1):
+        self.shiyao = shiyao
+    
+    def set_yingyao(self, ying: int = 1):
+        self.yingyao = ying
+    
+    def set_yongshen(self, yongshen: int = 1):
+        self.yongshen = yongshen
+
+    def set_dongyao(self, dong: int = 1):
+        self.dongyao = dong
+
+    def __str__(self) -> str:
+        return self.get_yao_str()
+
+    def get_yao_str(self) -> str:
+        str = self.name + ' '
+        if self.yinyang == 1:
+            str += '▄▄▄▄▄▄'  
+        else:
+            str += '▄▄  ▄▄'
+
+        str += ' ' + self.liuqin
+        str += ' ' + self.dizhi
+        str += self.wuxing
+
+        if self.shiyao == 1:
+            str += ' ' + '世'
+        elif self.yingyao == 1:
+            str += ' ' + '应'
+        else:
+            str += ' ' + '  '
+        
+        if self.yongshen == 1:
+            str += ' ' + '用神'
+        else:
+            str += ' ' + '    '
+
+        if self.dongyao == 1:
+            str += ' ---->'
+        else:
+            str += '      '
+        return str
+
+class ChongGua():
+    def __init__(self, guayaos: str, dongyao: list[int] = []):
+        self.guayaos = guayaos # 卦爻(从下往上，从1开始）格式 010100
+        self.name = ''     # 卦名称
+        self.guagong = '乾宫' # 卦宫位
+        self.guagong_yingyang = guayaos # 卦宫阴阳
+        self.guagong_wuxing = [] # 卦宫五行
+        self.dongyao = dongyao   # 动爻位置(从下往上，从1开始）
+        self.dizhi = []          # 爻地支 (从下往上）
+        self.liuqin = []         # 爻六亲 (从下往上）
+        self.shiyao = 0          # 世爻位置(从下往上，从1开始）
+        self.yingyao = 0         # 应爻位置(从下往上，从1开始）
+        self.yaos = []         # 卦爻(从下往上，从1开始）对象列表 list[GuaYao]
+        self.__init_chonggua(guayaos, dongyao)
+
+    def __init_chonggua(self, guayaos: str, dongyao: list[int] = []):
+        yaml_file_path = 'bagua.yaml'
+        with open(yaml_file_path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+
+        for palace_data in data:
+            for palace_name, palace_content in palace_data.items():
+                # 验证每卦
+                for idx, gua in enumerate(palace_content["八卦"]):
+                    if guayaos == gua['六爻']:
+                        self.name = gua['名称']
+                        self.guagong = palace_name
+                        self.guagong_yingyang = palace_content['阴阳']
+                        self.guagong_wuxing = palace_content['五行']
+                        self.liuqin = gua['六亲']
+                        self.dizhi = gua['地支']
+                        self.wuxing = gua['五行']
+                        self.shiyao = gua['世爻']
+                        self.yingyao = gua['应爻']
+                        break 
+        # 初始化每一爻对象
+        for i in range(1, 7):
+            guayao = GuaYao(i, int(guayaos[i - 1]), self.liuqin[i - 1], self.dizhi[i - 1], self.wuxing[i - 1])
+            if i in dongyao:
+                guayao.dongyao = 1
+            if i == self.yingyao:
+                guayao.yingyao = 1
+            if i == self.shiyao:
+                guayao.shiyao = 1
+            self.yaos.append(guayao)
+
+    def get_yao(self, yao_index: int) -> GuaYao:
+        '''
+        获取指定爻的字符串表示
+        :param yao_index: 爻序号(从下往上, 从1开始)
+        '''
+        return self.yaos[yao_index - 1]
+        # return {
+        #     "爻": self.guayao[yao_index - 1], #1表示阳爻，0表示阴爻
+        #     "地支": self.dizhi[yao_index - 1],
+        #     "五行": self.wuxing[yao_index - 1],
+        #     "六亲": self.liuqin[yao_index - 1],
+        #     "动静": "动" if yao_index in self.dongyao else "静",
+        #     "世爻": "是" if yao_index == self.shiyao else "否",
+        #     "应爻": "是" if yao_index == self.yingyao else "否",
+        #     "用神": "是" if yao_index == self.yingyao else "否"
+        # }
+    
+    def print_guaname(self):
+        print("%10s" % self.name)
+    def print_guayao(self):
+        for i in range(6, 0, -1):
+            print(self.get_yao_str(i))
+
+    def get_yao_str(self, yao_index: int) -> str:
+        '''
+        获取指定爻的字符串表示
+        :param yao_index: 爻序号(从下往上, 从1开始)
+        '''
+        if yao_index < 1 or yao_index > 6:
+            raise ValueError("爻序号必须在1到6之间")
+        return self.get_yao(yao_index).get_yao_str()
+
+class FiveElements:
+    """
+    五行生克关系封装类
+    核心功能：生克判断、旺衰计算、五行对应转换、基础刑冲合害判定
+    """
+    # 基础配置：五行顺序、生克关系、旺相休囚死（按四季）
+    ELEMENTS = ["木", "火", "土", "金", "水"]
+    GENERATION = {"木": "火", "火": "土", "土": "金", "金": "水", "水": "木"}  # 生
+    RESTRAINT = {"木": "土", "火": "金", "土": "水", "金": "木", "水": "火"}  # 克
+    # 五行对应：地支/四季/方位（可扩展）
+    BRANCH_MAP = {
+        "木": ["寅", "卯"],
+        "火": ["巳", "午"],
+        "土": ["辰", "丑", "未", "戌"],
+        "金": ["申", "酉"],
+        "水": ["子", "亥"]
+    }
+    SEASON_MAP = {"木": "春", "火": "夏", "土": "四季", "金": "秋", "水": "冬"}
+    # 旺相休囚死评分（越高越旺）
+    PROSPERITY_SCORE = {"旺": 3, "相": 2, "休": 1, "囚": 0, "死": -1}
+
+    def __init__(self, element: str):
+        """
+        初始化五行对象
+        :param element: 五行（木/火/土/金/水），大小写不敏感
+        """
+        self.element = element.strip()
+        if self.element not in self.ELEMENTS:
+            raise ValueError(f"无效五行：{self.element}，仅支持{self.ELEMENTS}")
+
+    def generates(self, target: str) -> bool:
+        """
+        判断本五行是否生目标五行
+        :param target: 目标五行
+        :return: True/False
+        """
+        if target not in self.ELEMENTS:
+            raise ValueError(f"无效五行：{target}")
+        return self.GENERATION[self.element] == target
+
+    def restrains(self, target: str) -> bool:
+        """
+        判断本五行是否克目标五行
+        :param target: 目标五行
+        :return: True/False
+        """
+        if target not in self.ELEMENTS:
+            raise ValueError(f"无效五行：{target}")
+        return self.RESTRAINT[self.element] == target
+
+    def is_generated_by(self, target: str) -> bool:
+        """
+        判断本五行是否被目标五行生
+        :param target: 目标五行
+        :return: True/False
+        """
+        return FiveElements(target).generates(self.element)
+
+    def is_restrained_by(self, target: str) -> bool:
+        """
+        判断本五行是否被目标五行克
+        :param target: 目标五行
+        :return: True/False
+        """
+        return FiveElements(target).restrains(self.element)
+
+    def get_prosperity_status(self, season: str) -> str:
+        """
+        根据季节判断五行旺相休囚死状态
+        :param season: 季节（春/夏/四季/秋/冬）
+        :return: 旺/相/休/囚/死
+        """
+        if season not in self.SEASON_MAP.values():
+            raise ValueError(f"无效季节：{season}，仅支持{list(self.SEASON_MAP.values())}")
+        
+        # 旺：当令；相：生我者；休：我生者；囚：克我者；死：我克者
+        season_element = [k for k, v in self.SEASON_MAP.items() if v == season][0]
+        if self.element == season_element:
+            return "旺"
+        elif self.is_generated_by(season_element):
+            return "相"
+        elif self.generates(season_element):
+            return "休"
+        elif self.is_restrained_by(season_element):
+            return "囚"
+        else:
+            return "死"
+
+    def get_prosperity_score(self, season: str) -> int:
+        """
+        获取五行在指定季节的旺衰得分
+        :param season: 季节
+        :return: 得分（3/2/1/0/-1）
+        """
+        status = self.get_prosperity_status(season)
+        return self.PROSPERITY_SCORE[status]
+
+    def get_branches(self) -> list:
+        """
+        获取本五行对应的地支列表
+        :return: 地支列表（如木→["寅","卯"]）
+        """
+        return self.BRANCH_MAP[self.element]
+
+    def is_combination(self, target_branch: str) -> bool:
+        """
+        基础六合判定（仅判断同五行合，扩展可加地支六合）
+        :param target_branch: 目标地支
+        :return: True/False
+        """
+        # 同五行地支为合（如寅卯合木，申酉合金）
+        return target_branch in self.get_branches()
+
+    def is_clash(self, target_branch: str) -> bool:
+        """
+        基础六冲判定（五行相冲）
+        :param target_branch: 目标地支
+        :return: True/False
+        """
+        # 先获取目标地支的五行
+        target_element = [k for k, v in self.BRANCH_MAP.items() if target_branch in v][0]
+        # 五行相冲：木克土、土克水、水克火、火克金、金克木（反向也冲）
+        return self.restrains(target_element) or self.is_restrained_by(target_element)
+
+
+
+class EarthlyBranch:
+    """
+    十二地支核心类（修正版）
+    核心修复：三合局由「三会」改为六爻标准「长生-帝旺-墓库」组合
+    功能：冲/合/刑/害全判定、五行归属、季节对应、月份映射、三合局批量判断等
+    """
+    # 基础配置：十二地支全量列表
+    BRANCHES = ["子", "丑", "寅", "卯", "辰", "巳", "午", "未", "申", "酉", "戌", "亥"]
+    
+    # 1. 地支→五行映射
+    BRANCH_TO_ELEMENT = {
+        "子": "水", "丑": "土", "寅": "木", "卯": "木",
+        "辰": "土", "巳": "火", "午": "火", "未": "土",
+        "申": "金", "酉": "金", "戌": "土", "亥": "水"
+    }
+    
+    # 2. 地支六合（成对，双向）
+    COMBINATION_PAIRS = [("子", "丑"), ("寅", "亥"), ("卯", "戌"), 
+                         ("辰", "酉"), ("巳", "申"), ("午", "未")]
+    
+    # 3. 地支六冲（成对，双向）
+    CLASH_PAIRS = [("子", "午"), ("丑", "未"), ("寅", "申"), 
+                   ("卯", "酉"), ("辰", "戌"), ("巳", "亥")]
+    
+    # 4. 地支三刑（分类型：无礼刑/恃势刑/无恩刑/自刑）
+    PUNISH_PAIRS = [
+        ("寅", "巳"), ("巳", "申"), ("申", "寅"),  # 恃势刑（寅巳申三刑）
+        ("丑", "戌"), ("戌", "未"), ("未", "丑"),  # 无恩刑（丑戌未三刑）
+        ("子", "卯"), ("卯", "子"),                # 无礼刑（子卯相刑）
+        ("辰", "辰"), ("午", "午"), ("酉", "酉"), ("亥", "亥")  # 自刑
+    ]
+    
+    # 5. 地支六害（成对，双向）
+    HARM_PAIRS = [("子", "未"), ("丑", "午"), ("寅", "巳"), 
+                  ("卯", "辰"), ("申", "亥"), ("酉", "戌")]
+    
+    # ✅ 核心修复：六爻标准三合局（长生-帝旺-墓库）
+    # 格式：{五行: (长生, 帝旺, 墓库)}
+    TRIAD_COMBINATIONS = {
+        "水": ("申", "子", "辰"),  # 申子辰合水局
+        "火": ("寅", "午", "戌"),  # 寅午戌合火局
+        "木": ("亥", "卯", "未"),  # 亥卯未合木局
+        "金": ("巳", "酉", "丑"),  # 巳酉丑合金局
+        "土": None  # 三合局无独立土局，土以四库论（辰戌丑未）
+    }
+
+    # 6. 地支→月份映射（农历，1-12月）
+    BRANCH_TO_MONTH = {
+        "寅": 1, "卯": 2, "辰": 3, "巳": 4, "午": 5, "未": 6,
+        "申": 7, "酉": 8, "戌": 9, "亥": 10, "子": 11, "丑": 12
+    }
+    
+    # 7. 地支→季节映射（含土的特殊规则：四季末月）
+    BRANCH_TO_SEASON = {
+        "寅": "春", "卯": "春", "辰": "春",  # 辰为春末土
+        "巳": "夏", "午": "夏", "未": "夏",
+        "申": "秋", "酉": "秋", "戌": "秋",
+        "亥": "冬", "子": "冬", "丑": "冬"
+    }
+    
+    # 8. 季节→当令五行（用于旺衰判断）
+    SEASON_TO_ELEMENT = {"春": "木", "夏": "火", "秋": "金", "冬": "水", "四季": "土"}
+
+    # 9. 五行 在十二地支的 十二长生 状态
+    # 十二长生阶段
+    STAGES = ["长生", "沐浴", "冠带", "临官", "帝旺",
+              "衰", "病", "死", "墓", "绝", "胎", "养"]
+    # 五行长生起点
+    CHANGSHENG_START = {
+        "木": "亥",
+        "火": "寅",
+        "土": "寅",
+        "金": "巳",
+        "水": "申"
+    }
+
+    def __init__(self, branch: str):
+        """初始化地支对象，严格校验输入"""
+        self.branch = branch.strip()
+        if self.branch not in self.BRANCHES:
+            raise ValueError(f"无效地支：{self.branch}，仅支持{self.BRANCHES}")
+        
+        # 缓存核心属性
+        self.element = self.BRANCH_TO_ELEMENT[self.branch]
+        self.month = self.BRANCH_TO_MONTH[self.branch]
+        self.season = self.BRANCH_TO_SEASON[self.branch]
+        self.season_element = self.SEASON_TO_ELEMENT[self.season]
+
+    # ========== 基础属性获取 ==========
+    def get_element(self) -> str:
+        """获取当前地支的五行归属"""
+        return self.element
+
+    def get_month(self) -> int:
+        """获取当前地支对应的农历月份（1-12）"""
+        return self.month
+
+    def get_season(self) -> str:
+        """获取当前地支对应的季节（春/夏/秋/冬）"""
+        return self.season
+
+    # ========== 冲合刑害判定 ==========
+    def _validate_target_branch(self, target_branch: str) -> None:
+        """私有辅助：校验目标地支合法性"""
+        if target_branch not in self.BRANCHES:
+            raise ValueError(f"无效目标地支：{target_branch}，仅支持{self.BRANCHES}")
+
+    def is_combined_with(self, target_branch: str) -> bool:
+        """判断当前地支是否与目标地支六合"""
+        self._validate_target_branch(target_branch)
+        pair = (self.branch, target_branch)
+        return pair in self.COMBINATION_PAIRS or pair[::-1] in self.COMBINATION_PAIRS
+
+    def is_clashed_with(self, target_branch: str) -> bool:
+        """判断当前地支是否与目标地支六冲"""
+        self._validate_target_branch(target_branch)
+        pair = (self.branch, target_branch)
+        return pair in self.CLASH_PAIRS or pair[::-1] in self.CLASH_PAIRS
+
+    def is_punished_with(self, target_branch: str) -> bool:
+        """判断当前地支是否与目标地支相刑（含三刑/无礼刑/自刑）"""
+        self._validate_target_branch(target_branch)
+        return (self.branch, target_branch) in self.PUNISH_PAIRS or (target_branch, self.branch) in self.PUNISH_PAIRS
+
+    def is_harmed_with(self, target_branch: str) -> bool:
+        """判断当前地支是否与目标地支六害"""
+        self._validate_target_branch(target_branch)
+        pair = (self.branch, target_branch)
+        return pair in self.HARM_PAIRS or pair[::-1] in self.HARM_PAIRS
+
+    # ========== 三合局核心逻辑（修正版） ==========
+    def get_triad_combination(self) -> Optional[Tuple[str, str, str]]:
+        """获取当前地支所属的标准三合局，无则返回None"""
+        for triad in self.TRIAD_COMBINATIONS.values():
+            if triad and self.branch in triad:
+                return triad
+        return None
+
+    def is_in_triad(self, target_branches: List[str]) -> bool:
+        """判断当前地支与目标地支是否能组成完整三合局"""
+        for b in target_branches:
+            self._validate_target_branch(b)
+        
+        current_triad = self.get_triad_combination()
+        if not current_triad:
+            return False
+        
+        # 必须包含三合局的全部三支
+        all_branches = {self.branch} | set(target_branches)
+        return set(current_triad).issubset(all_branches)
+
+    def get_wangxiangxiuqiusi(self, wuxing) -> str:
+        """获取参数 五行 在本地支月对应季节的旺衰状态（旺/相/休/囚/死）"""
+        #当令者旺(相同)，我生者相，生我者休，克我者囚，我克者死
+        month_wuxing = FiveElements(self.element)
+        if month_wuxing.element == wuxing:
+            return "旺"
+        elif month_wuxing.generates(wuxing):
+            return "相"
+        elif month_wuxing.is_generated_by(wuxing):
+            return "休"
+        elif month_wuxing.is_restrained_by(wuxing):
+            return "囚"
+        else:
+            return "死"
+
+
+    # ========== 旺衰判定（兼容降级） ==========
+    def get_prosperity_status(self) -> str:
+        """获取当前地支在对应季节的旺衰状态（旺/相/休/囚/死）
+        
+        """
+        try:
+            self_elem = FiveElements(self.element)
+            season_elem = FiveElements(self.season_element)
+            
+            if self.element == self.season_element:
+                return "旺"
+            elif self_elem.is_generated_by(season_elem.element):
+                return "相"
+            elif self_elem.generates(season_elem.element):
+                return "休"
+            elif self_elem.is_restrained_by(season_elem.element):
+                return "囚"
+            else:
+                return "死"
+        except ImportError:
+            # 本地降级实现
+            generation = {"木": "火", "火": "土", "土": "金", "金": "水", "水": "木"}
+            restraint = {"木": "土", "火": "金", "土": "水", "金": "木", "水": "火"}
+            
+            if self.element == self.season_element:
+                return "旺"
+            elif generation.get(self.season_element) == self.element:
+                return "相"
+            elif generation.get(self.element) == self.season_element:
+                return "休"
+            elif restraint.get(self.season_element) == self.element:
+                return "囚"
+            else:
+                return "死"
+
+    # ========== 公开类方法（修正版） ==========
+    @classmethod
+    def get_all_branches(cls) -> List[str]:
+        """获取所有十二地支列表"""
+        return cls.BRANCHES
+
+    @classmethod
+    def get_branches_by_element(cls, element: str) -> List[str]:
+        """根据五行获取对应的地支列表"""
+        if element not in cls.SEASON_TO_ELEMENT.values():
+            raise ValueError(f"无效五行：{element}，仅支持{list(cls.SEASON_TO_ELEMENT.values())}")
+        return [b for b, e in cls.BRANCH_TO_ELEMENT.items() if e == element]
+
+    @classmethod
+    def is_triad_combination(cls, branches: List[str]) -> bool:
+        """
+        类方法：严格判断地支列表是否构成标准三合局
+        规则：必须包含且仅需包含某三合局的全部三支（顺序无关）
+        """
+        # 校验输入合法性
+        for b in branches:
+            if b not in cls.BRANCHES:
+                raise ValueError(f"无效地支：{b}，仅支持{cls.BRANCHES}")
+        
+        branch_set = set(branches)
+        # 遍历所有标准三合局，判断是否完全匹配
+        for triad in cls.TRIAD_COMBINATIONS.values():
+            if triad and set(triad) == branch_set:
+                return True
+        return False
+
+    @classmethod
+    def get_triad_type(cls, branches: List[str]) -> Optional[str]:
+        """返回三合局对应的五行，非三合局则返回None"""
+        if not cls.is_triad_combination(branches):
+            return None
+        
+        branch_set = set(branches)
+        for elem, triad in cls.TRIAD_COMBINATIONS.items():
+            if triad and set(triad) == branch_set:
+                return elem
+        return None
+
+    @classmethod
+    def get_changsheng_stage(cls, branch: str, element: str) -> str:
+        """返回五行 在地支的 十二长生 阶段"""
+        if element not in cls.CHANGSHENG_START:
+            raise ValueError("无效五行")
+
+        start_branch = cls.CHANGSHENG_START[element]
+
+        current_index = cls.BRANCHES.index(branch)
+        start_index = cls.BRANCHES.index(start_branch)
+
+        stage_index = (current_index - start_index) % 12
+
+        return cls.STAGES[stage_index]
+
+
+
+# ------------------------------
+# 测试用例（可直接运行验证）
+# ------------------------------
+if __name__ == "__main__":
+    # 1. 生克判断
+    wood = FiveElements("木")
+    print("=== 生克判断 ===")
+    print(f"木生火：{wood.generates('火')}")          # True
+    print(f"木克土：{wood.restrains('土')}")          # True
+    print(f"木被水生：{wood.is_generated_by('水')}")  # True
+    print(f"木被金克：{wood.is_restrained_by('金')}") # True
+
+    # 2. 旺衰判断
+    print("\n=== 旺衰判断 ===")
+    print(f"木在春季的状态：{wood.get_prosperity_status('春')}")  # 旺
+    print(f"木在春季的得分：{wood.get_prosperity_score('春')}")  # 3
+    print(f"木在秋季的状态：{wood.get_prosperity_status('秋')}")  # 囚
+    print(f"木在秋季的得分：{wood.get_prosperity_score('秋')}")  # 0
+
+    # 3. 地支对应与冲合
+    print("\n=== 地支对应与冲合 ===")
+    print(f"木对应的地支：{wood.get_branches()}")        # ["寅","卯"]
+    print(f"寅与卯合：{wood.is_combination('卯')}")      # True
+    print(f"寅与申冲：{wood.is_clash('申')}")            # True
+
+    # 4. 异常测试（无效五行）
+    try:
+        invalid = FiveElements("风")
+    except ValueError as e:
+        print(f"\n异常测试：{e}")  # 无效五行：风，仅支持['木','火','土','金','水']
+
+
+
+
+# ------------------------------
+# 修正后的测试用例（关键验证）
+# ------------------------------
+
+    print("=== 核心修正：三合局判定 ===")
+    # 正确三合局（应返回True）
+    print(f"申子辰合水局：{EarthlyBranch.is_triad_combination(['申','子','辰'])}")  # True
+    print(f"寅午戌合火局：{EarthlyBranch.is_triad_combination(['寅','午','戌'])}")  # True
+    print(f"亥卯未合木局：{EarthlyBranch.is_triad_combination(['亥','卯','未'])}")  # True
+    print(f"巳酉丑合金局：{EarthlyBranch.is_triad_combination(['巳','酉','丑'])}")  # True
+
+    # 错误组合（原三会局，应返回False）
+    print(f"寅卯辰（旧错误组合）：{EarthlyBranch.is_triad_combination(['寅','卯','辰'])}")  # False
+
+    # 三合局类型测试
+    print(f"申子辰的五行类型：{EarthlyBranch.get_triad_type(['申','辰','子'])}")  # 水
+
+    # 冲合刑害测试（不受影响，正常生效）
+    print("\n=== 冲合刑害验证 ===")
+    zi = EarthlyBranch("子")
+    mao = EarthlyBranch("卯")
+    print(f"子卯无礼刑：{zi.is_punished_with('卯')}")  # True
+    print(f"子未六害：{zi.is_harmed_with('未')}")       # True
