@@ -1,0 +1,765 @@
+import yaml
+
+from ganzhi_time import GanZhiTime
+from liuyao import GuaYao, ChongGua, FiveElements, EarthlyBranch
+'''
+需要安装库:
+pip install lunar_python
+
+
+需要引入文件:
+bagua.yaml
+
+阳: 1, 奇数
+阴: 0, 偶数
+
+甲乙卯寅东方木
+丙丁巳午南方火
+戊己庚辛西方金
+壬癸亥子北方水
+
+
+解卦报告分为以下部分：
+打印 起卦时间，年建，月建，日建，日旬空
+本卦， 变卦 挂画（包含六亲，地支， 五行，世爻，应爻，用神， 原神？忌神？）
+
+
+"旺衰分析": total_force,
+"吉凶判断": ji_xiong,
+"应期推断": ying_qi,
+"操作建议": 
+  "核心建议": []
+  "风险提醒": []
+
+
+'''
+
+
+# 四时旺相系数
+# 旺、相、休、囚、死是对事物的性质的形容。在四时中，由于寒、暖、燥、湿不同， 五行 也会受到彩响，发生旺衰起伏的变化，这样的变化状态被称为旺、相、休、死、囚。
+# 当令者旺，我生者相，生我者休，克我者囚，我克者死
+# 例如寅月，卯月 对应五行为木， 所以木 旺于 春，辰月为土， 木克土为（克我者囚），所以木在辰月 为囚
+# 所以 五行的 四时（季）旺相休囚死 只要判断 月地支 跟该 五行的 生克 即可。
+'''
+五行随四季（春、夏、秋、冬）更替，呈现五种状态。六爻中土的规则特殊，需单独记忆。
+表格
+状态	定义	核心逻辑
+旺	当令得时	季节的主宰，能量最强（如木在春）。
+相	辅佐得势	被旺者所生（如火在春，木生火），能量次强。
+休	退休卸任	生旺者（如水在春，水生木），能量退隐，平和。
+囚	被克受制	克旺者（如金在春，金克木），被旺气反制，能量最弱。
+死	被泄无气	旺者所克（如土在春，木克土），能量被泄尽。
+1. 五行四季旺衰总表（六爻实战标准）  
+这是六爻断卦的绝对标准，请以此为准进行编码。
+表格
+五行	春季 (木旺)	夏季 (火旺)	秋季 (金旺)	冬季 (水旺)	四季末 (土旺)
+木	     旺	        休	        死	        相	      囚
+火	     相	        旺	        囚	        死	      休
+土	     死	        相	        休	        囚	      旺
+金	     囚	        死	        旺	        休	      相
+水	     休	        囚	        相	        旺	      死
+2. 关键特殊规则（编程必看）
+土的特殊性：土不主某一个完整季节，而是主四季的最后 18 天（辰、未、戌、丑月）。在六爻量化中，为了简化计算，通常将辰、戌、丑、未这四个月直接判定为 “土旺”。
+三合局优先：若卦中形成三合局（如申子辰水局），局中五行的旺衰会被局气加持，优先级高于季节旺衰。
+'''
+SI_SHI = {
+    "旺": 1.3,
+    "相": 1.2,
+    "休": 1.0,
+    "囚": 0.9,
+    "死": 0.8
+}
+
+# SI_SHI = {
+#     "木": {"春": 0.2, "夏": -0.1, "秋": -0.2, "冬": 0.1},
+#     "火": {"春": 0.1, "夏": 0.2, "秋": -0.1, "冬": -0.2},
+#     "土": {"春": -0.1, "夏": 0.1, "秋": 0.1, "冬": -0.1},
+#     "金": {"春": -0.2, "夏": -0.1, "秋": 0.2, "冬": 0.1},
+#     "水": {"春": 0.1, "夏": -0.2, "秋": -0.1, "冬": 0.2}
+# }
+
+YUE_JIAN_WEIGHTS = {
+    "临月建": 5.0,    # 爻与月建同地支，力量最强（得令）     地支相同
+    "月建合": 3.0, # 月建与用神地支六合，力量略弱于相生   地支六合
+    "月建生": 3.0, # 月建五行生用神五行，次旺（得相）    五行生
+    "月帮扶": 2.0,   # 五行相同但地支不同（如寅月卯木），帮扶力较弱    五行相同
+    "无作用": 0.0,     # 无生克冲合关系
+    "月建克": -3.0, # 月建五行克用神五行，力量为负; 用神力量被削弱，但并非完全失效。若用神本身有日辰生扶、动爻生助或化回头生，仍可转危为安。性质‌：是“被克制”，属于常态性衰弱，有“月克日生”等化解可能。 五行克
+    "月破": -5.0,       # 月建冲用神（月破）地支相冲，力量最弱; 月破被视为“枯根朽木”，能量被彻底冲散，‌在当月内几乎失去作用‌。即使有日辰生扶，也难起效，除非是“假破”（如动爻生扶、化回头生）。‌性质‌：是“被冲散”，属于‌极衰之象‌，是六爻中公认的凶兆之一。《增删卜易》等经典指出：“用神临月破，倒霉之象，虽有似无。” 地支相冲
+}
+
+'''
+日辰关系	得分	适用条件	补充规则
+临日建	    +5	用神地支＝日辰	最强生扶，不受月克影响
+日合（用神静）	+2	日辰与静用神六合	合起，静爻变有力，逢冲则解
+日合（用神发动）	+1	日辰与动用神六合	合绊，动爻行动力受限，增力减弱
+日生	    +3	日辰五行生用神五行	持续助气，与月生叠加
+帮扶	    +2	日辰与用神同五行（非临值）	比和助气，如寅日卯木
+日破（用神静）	-4	衰静用神被日辰冲	静爻无气，逢生难起
+日冲（旺相静爻）	+2（暗动）	旺相静用神被日辰冲	静中有动，应期快，短时效
+日克	   -3	日辰五行克用神五行	力量大减，与月克叠加
+'''
+RI_CHEN_WEIGHTS = {
+    "临日建": 5.0,  # 用神地支＝日辰	最强生扶，不受月克影响
+    "日帮扶": 2.0,  # 日辰与用神同五行（非临值）地支不同，比和助气，如寅日卯木
+    "日合静": 2.0,  # 日辰与静用神六合，合起，静爻变有力，逢冲则解
+    "日合动": 1.0,  # 日辰与动用神六合，合绊，动爻行动力受限，增力减弱
+    "日生": 3.0,    # 日辰五行生用神五行，持续助气，与月生叠加
+    "日克": -3.0,   # 日辰五行克用神五行，力量大减，与月克叠加
+    "日破": -4.0,   # 日辰与用神静六合，衰静用神被日辰冲，静爻无气，逢生难起
+    "日冲": 2.0,    # （暗动）旺相静用神被日辰冲	静中有动，应期快，短时效
+    "无作用": 0.0,  # 无生克冲合关系
+}
+
+
+# 第一部分 变爻状态系数, 计算 趋势分的 时候 ，根据 变爻的状态 来 计算 动爻的 趋势分，例如 动爻 化回头克，但是变爻旬空，所以回头生无效了（回头生的分数 * 该系数)。
+'''
+旺相（日月生扶 / 临值）	1.0	全力作用动爻
+平相（日月不生不克）	0.7	中力作用动爻
+休囚（日月克泄）	   0.3	弱力作用动爻
+旬空 / 月破 / 日破	   0.0	无生克权，不作用
+
+
+
+变爻满足以下任一条件，有效系数 = 0，跳过分数计算：
+月破：月建冲变爻（如寅月申爻）。
+日破：变爻衰静且被日辰冲（旺相静爻逢日冲为暗动，不判日破）。
+旬空：变爻在当前旬空范围内（如甲子旬戌亥空）。
+入日月墓：变爻为日月墓库（如木爻入未月 / 未日 墓）。
+
+但是入墓如果被日冲，形成冲库。 照常计算日月总分
+
+应期计算：
+变爻旬空X 出空填实之日，
+变爻入墓 被 日冲或被月冲 
+
+S 为日月总分
+S ≥ +6	极旺	1.0	日月全力生扶，变爻作用最强
++3 ≤ S ≤ +5	旺相	0.9	日月一方临值 / 生，一方帮扶，作用力强
+0 ≤ S ≤ +2	平相	0.7	日月不生不克或轻微帮扶，作用力中等
+-2 ≤ S ≤ -1	休囚	0.3	日月轻微克制，作用力弱
+S ≤ -3	极衰	0.1	日月全力克制，作用力极弱（近乎无效）
+'''
+BIAN_YAO_COEFF = {
+
+
+}
+
+'''
+动爻化变（动变分 ±4，第二层级）
+核心规则
+先算变爻有效系数（见第一部分），再乘以基础分，得到实际作用分。
+化进 / 退神按 “同五行顺逆” 判定，化六冲为 “动变地支六冲”。
+化墓 / 绝 / 空 / 破，先判定变爻状态，再按系数作用。
+
+表格:
+动变类型	基础分	实际得分公式	判定条件	补充规则
+化进神	+4	4× 变爻系数	同五行顺次（寅→卯、巳→午等）	增力持续，越变越旺
+化回头生	+4	4× 变爻系数	变爻生动爻（如午火→寅木）	吉性最强，动爻能量源源不断
+化退神	-4	-4× 变爻系数	同五行逆次（卯→寅、午→巳等）	减力持续，越变越衰
+化回头克	-4	-4× 变爻系数	变爻克动爻（如午火→子水）	凶性最强，变爻无系数则无效
+化六冲	-3	-3× 变爻系数	动变地支六冲（子午、丑未等）	反复受阻，力量散佚
+化空	-2	-2× 变爻系数	变爻旬空	旺空出空有用，衰空真空
+化破	-3	-3× 变爻系数	变爻月破 / 日破	变爻无生克权时，此条无效
+化墓	-2	-2× 变爻系数	变爻为动爻墓库（木→未、火→戌等）	能量被收藏，冲墓日解脱
+化绝	-3	-3× 变爻系数	变爻为动爻绝地（木→申、火→亥等）	生机断绝，无救则事难成
+'''
+DONG_YAO_WEIGHTS = {
+    "化进神": 4.0,    # 同五行顺次（寅→卯、巳→午等, 土为丑辰未戌）	增力持续，越变越旺
+    "化回头生": 4.0,  # 变爻生动爻（如午火→寅木）	吉性最强，动爻能量源源不断
+    "化退神": -4.0,   # 同五行逆次（卯→寅、午→巳等）	减力持续，越变越衰
+    "化回头克": -4.0, # 变爻克动爻（如午火→子水）	凶性最强，变爻无系数则无效
+    "化六冲": -3.0,   # 动变地支六冲（子午、丑未等）	反复受阻，力量散佚
+    "化空": -2.0,     # 变爻旬空	旺空出空有用，衰空真空
+    "化破": -3.0,     # 变爻月破 / 日破	变爻无生克权时，此条无效
+    "化墓": -2.0,     # 变爻为动爻墓库（木→未、火→戌等）	能量被收藏，冲墓日解脱
+    "化绝": -3.0,     # 变爻为动爻绝地（木→申、火→亥等）	生机断绝，无救则事难成
+}
+
+'''
+动爻 对 元神爻的 作用分。
+'''
+DONG_YAO_YUANSHEN_SCORE = {
+    "生": 3.0,  # 动爻五行 生 元神五行
+    "克": -3.0, # 动爻五行 克 元神五行
+    "合": 2.0,  # 动爻地支 合 元神地支
+    "冲": 2.0,  # 动爻地支 冲 元神地支
+    "刑": -1.0, # 动爻地支 刑 元神地支
+    "害": -1.0, # 动爻地支 害 元神地支
+    "比和": 1.0, # 动爻五行 比和 元神五行
+}
+
+
+
+# 先计算 所有爻的 日月分支，
+# 然后遍历所有动爻 对用神的影响  当前衰旺
+
+# 未来趋势分计算：
+# 计算变爻的 日月分值 看变爻的基础力量
+# 计算动爻的 化 类型来 计算 动爻的最终分（日月分+化分)
+# 再看用神对 世爻的影响
+# 
+
+
+class Jiegua():
+    def __init__(self, qigua_date: str, guayaos: str, dongyao: list[int], yongshen: str, wenshi: str):
+        '''
+        解析提供的参数，初始化卦爻、年建、月建、日建
+        params:
+        qigua_date: 询问的日期
+        guayaos: 卦爻
+        dongyao: 动爻
+        yongshen: 用神 值为 六亲之一
+        wenshi: 所问事情
+        '''
+        self.qigua_date = qigua_date
+        self.guayaos = guayaos
+        self.dongyao = dongyao
+        self.yongshen = yongshen
+        self.yongshen_yao = None # GuaYao对象
+        self.yuanshen_yao = None # GuaYao对象 元神 生用神的爻
+        self.jishen_yao = None # GuaYao对象   忌神 克用神的爻
+        self.choushen_yao = None # GuaYao对象 仇神 克元神、生忌神的爻
+        self.shiyao = None # GuaYao对象  世爻 
+        self.yingyao = None # GuaYao对象 应爻 
+        self.wenshi = wenshi
+        self.bengua = None
+        self.biangua = None
+        self.__init_time_ganzhi(qigua_date)
+        self.__init_bengua(guayaos, dongyao)
+        self.__init_biangua(guayaos, dongyao)
+        self.__init_yongshen(yongshen)
+
+    
+    def __init_time_ganzhi(self, qigua_date: str):
+        self.qigua_year = int(qigua_date.split('-')[0]) #年
+        self.qigua_month = int(qigua_date.split('-')[1]) #月建
+        self.qigua_day = int(qigua_date.split('-')[2]) #日建
+        
+        self.time = GanZhiTime(self.qigua_year, self.qigua_month, self.qigua_day)
+
+        self.qigua_year_ganzhi = self.time.getYearInGanZhi() 
+        self.qigua_month_ganzhi = self.time.getMonthInGanZhi()  #月建
+        self.qigua_day_ganzhi = self.time.getDayInGanZhi() #日建
+        self.qigua_day_xunkong = self.time.getDayXunKong() #旬空 日地支
+        self.month_dizhi = self.qigua_month_ganzhi[1]  #月 地支
+        self.day_dizhi = self.qigua_day_ganzhi[1]      #日 地支
+        self.month_wuxing = EarthlyBranch(self.month_dizhi).get_element()  #月 五行
+        self.day_wuxing = EarthlyBranch(self.day_dizhi).get_element()      #日 五行
+        self.season = EarthlyBranch(self.month_dizhi).get_season()  #根据月地支返回季节 春夏秋冬
+
+    def __init_bengua(self, guayaos: str, dongyao: list[int]):
+        self.bengua = ChongGua(guayaos, dongyao)
+        # 设置世应对象
+        for idx, yao in enumerate(self.bengua.yaos):
+            if yao.shiyao == 1:
+                self.shiyao = yao
+            elif yao.yingyao == 1:
+                self.yingyao = yao
+
+    def __init_biangua(self, guayaos: str, dongyao: list[int]):
+        if dongyao:
+            _guayao_list = list(guayaos)
+            for dy_index in dongyao:
+                _guayao_list[dy_index - 1] = str(abs(int(_guayao_list[dy_index - 1]) - 1))
+            self.biangua = ChongGua(''.join(_guayao_list))
+        # 设置动爻的变爻对象
+        for idx, yao in enumerate(self.bengua.yaos):
+            if yao.dongyao:
+                yao.bianyao = self.biangua.yaos[idx]
+
+    def __init_yongshen(self, yongshen: str):
+        # self.yongshen = yongshen
+        # self.yongshen_gua = GuaYao(yongshen)
+        # self.yongshen_gua_elem = FiveElements(self.yongshen_gua)
+        # self.yongshen_gua_branch = EarthlyBranch(self.yongshen_gua)
+        """ 选取用神 并设置 用神爻对象 """
+        yaos = self.bengua.yaos
+        for yao in yaos:
+            if yao.liuqin == yongshen:
+                yao.set_yongshen(1)
+                self.yongshen_yao = yao
+                print("用神", yongshen)
+                break
+        else:
+            print("没有用神")
+
+    def print_guahua(self):
+        '''打印整个卦画， 含所测事项，起卦干支，旬空，本卦，变卦'''
+        guahua_str = []
+        # 第一行
+        wenshi_str = f"所测事项：{self.wenshi}"
+        guahua_str.append(wenshi_str)
+        # 第二行
+        qigua_ganzhi_str = f"起卦干支：{self.qigua_year_ganzhi}年 {self.qigua_month_ganzhi}月 {self.qigua_day_ganzhi}日   旬空({self.qigua_day_xunkong})"
+        guahua_str.append(qigua_ganzhi_str)
+        # 第三行
+        qigua_ganzhi_next_str = f"                   {self.month_wuxing}     {self.day_wuxing}"
+        guahua_str.append(qigua_ganzhi_next_str)
+        # 第四行
+        gua_name_str = f"    本卦：{self.bengua.name}       变卦：{self.biangua.name}"
+        guahua_str.append(gua_name_str)
+    
+        # 第五行  第六爻
+        for i in range(6, 0, -1):
+            guahua_str.append(f"{self.bengua.get_yao_str(i)} {self.biangua.get_yao_str(i)}")
+
+        print("\n".join(guahua_str))
+
+
+    def calc_shuaiwang(self):
+        #计算所有爻（含变爻)的 日月得分
+        for idx, yao in enumerate(self.bengua.yaos):
+            self._calc_month_score(yao)
+            self._calc_day_score(yao)
+
+        # 动爻对用神的 影响分
+        self.yongshen_yao.dongyao_score = 0.0
+        self.yongshen_yao.dongyao_score_str = []
+        for idx, yao in enumerate(self.bengua.yaos):
+            if yao.dongyao:
+                score, dongyao_str = self._calc_dongyao_yongshen_score(yao, self.yongshen_yao)
+                self.yongshen_yao.dongyao_score += score
+                self.yongshen_yao.dongyao_score_str.extend(dongyao_str)
+                # self.yongshen_yao.dongyao_score += self._calc_dongyao_yongshen_score(yao, self.yongshen_yao)
+        # 用神总得分
+        total_score = self.yongshen_yao.dongyao_score + self.yongshen_yao.month_score[0] + self.yongshen_yao.day_score[0]
+        print("用神总得分", total_score)
+        '''七、旺衰判定标准（可量化）
+        表格
+        得分区间	旺衰等级	吉凶倾向
+        ≥+5	极旺	事必成，力量强劲
+        +1~+4	旺相	事可成，助力充足
+        -2~0	平相	事难定，需等待时机
+        -5~-3	休囚	事难成，阻力较大
+        ≤-6	极衰	事必败，无药可救
+        '''
+        jixiong = "" #吉凶结果
+        if total_score >= 5:
+            jixiong = "极旺"
+        elif total_score >= 1:
+            jixiong = "旺相"
+        elif total_score >= -2:
+            jixiong = "平相"
+        elif total_score >= -5:
+            jixiong = "休囚"
+        else:
+            jixiong = "大凶"
+        print(f"吉凶结果：{jixiong}")
+        print(f"  用神总得分：{total_score}")
+        print(f"  月建作用力量：{self.yongshen_yao.month_score}")
+        print(f"  日建作用力量：{self.yongshen_yao.day_score}")
+        print(f"  动爻作用力量：{self.yongshen_yao.dongyao_score} {' '.join(self.yongshen_yao.dongyao_score_str)}")
+
+        #计算用神的未来得分， 需要考虑 变爻对动爻的影响了
+
+        
+        # 应爻对用神的得分 及关系
+        print("-" * 40, "应爻对用神的得分 及关系")
+        self.calc_yinyao_yongshen_score()
+
+        # 用神对世爻的影响分
+
+
+        # 用神总得分
+
+
+        # ----------分析趋势分-----------
+        #   计算变爻系数
+        for idx, yao in enumerate(self.bengua.yaos):
+            if yao.dongyao and yao.bianyao:
+                yao.bianyao_coeff = self._calc_bianyao_coeff(yao.bianyao)
+        #   计算动爻的 趋势分（日月分 + 变爻对其影响分），也就是动爻的最终分。
+        
+
+        # 重新计算动爻对用神 趋势分
+
+
+        # month_result = self._calc_month_score(self.yongshen_yao)
+        # # month_score = _calc_day_score()
+        # print(month_result)
+
+
+
+
+    def _calc_month_score(self, guayao: GuaYao) -> (float, list[str]):
+        """
+        计算月建作用力量（修正版）：区分临月建、月生、月克、月合，符合六爻经典规则
+        1.分层权重体系
+            临月建（1.2）：爻与月建同地支（如寅月寅木），为 “得令”，力量最强。
+            月建生用神（1.0）：月建五行生用神五行（如寅月午火），为 “得相”，次旺。
+            月建合用神（0.9）：月建与用神六合（如寅月亥水），力量略弱于相生。
+            同类帮扶（0.8）：五行相同但地支不同（如寅月卯木），帮扶力较弱。
+            月建克用神（-1.0）：月建五行克用神五行（如寅月申金），为 “休囚”，力量为负。
+            月破（-1.5）：月建冲用神（如寅月申金），为 “月破”，力量最弱。
+        2.优先级逻辑
+            先判月破（最高优先级，直接返回）→ 再判临月建 → 再判月合 → 最后判五行生克，符合六爻断卦的优先级规则。
+        3.修正系数优化
+            空亡修正：月建空亡则力量减半（系数 0.5），符合 “空亡则力弱” 的原则。
+            四时系数：改为(1 + si_shi_coeff)，使四时旺相系数作为增量调整，而非直接相乘，更符合实际旺衰影响（如春季木旺，si_shi_coeff=0.2，总系数为 1.2）。
+        
+        params:
+        guayao: 爻对象 (一般是用神的爻，从1开始)
+        """
+        # # 基础权重配置（严格按力量层级划分）
+        # YUE_JIAN_WEIGHTS = {
+        #     "临月建": 1.2,    # 爻与月建同地支，力量最强（得令）     地支相同
+        #     "月建生用神": 1.0, # 月建五行生用神五行，次旺（得相）    五行生
+        #     "月建合用神": 0.9, # 月建与用神地支六合，力量略弱于相生   地支六合
+        #     "同类帮扶": 0.8,   # 五行相同但地支不同（如寅月卯木），帮扶力较弱    五行相同
+        #     "无作用": 0.0,     # 无生克冲合关系
+        #     "月建克用神": -1.0, # 月建五行克用神五行，力量为负; 用神力量被削弱，但并非完全失效。若用神本身有日辰生扶、动爻生助或化回头生，仍可转危为安。性质‌：是“被克制”，属于常态性衰弱，有“月克日生”等化解可能。 五行克
+        #     "月破": -1.5       # 月建冲用神（月破）地支相冲，力量最弱; 月破被视为“枯根朽木”，能量被彻底冲散，‌在当月内几乎失去作用‌。即使有日辰生扶，也难起效，除非是“假破”（如动爻生扶、化回头生）。‌性质‌：是“被冲散”，属于‌极衰之象‌，是六爻中公认的凶兆之一。《增删卜易》等经典指出：“用神临月破，倒霉之象，虽有似无。” 地支相冲
+        # }
+
+        month_str = []
+
+        # 获取指定本卦指定爻对象
+        yao_dizhi = guayao.dizhi #爻地支
+        yao_wuxing = guayao.wuxing #爻五行
+
+        #月建
+        month_dizhi = self.month_dizhi #月建地支
+        month_wuxing = self.month_wuxing #月建五行
+       
+        # 1. 优先判断月破（最高优先级，直接返回月破权重）
+        if EarthlyBranch(month_dizhi).is_clashed_with(yao_dizhi):
+            month_str.append("月破")
+            base_force = YUE_JIAN_WEIGHTS["月破"]
+        # 2. 判断临月建（值月）
+        elif month_dizhi == yao_dizhi:
+            month_str.append("临月建")
+            base_force = YUE_JIAN_WEIGHTS["临月建"]
+        # 3. 判断月合
+        elif EarthlyBranch(month_dizhi).is_combined_with(yao_dizhi):
+            month_str.append("月建合")
+            base_force = YUE_JIAN_WEIGHTS["月建合"]
+        # 4. 判断五行生克关系
+        else:
+            if FiveElements(month_wuxing).generates(yao_wuxing):
+                month_str.append("月建生")
+                base_force = YUE_JIAN_WEIGHTS["月建生"]
+            elif FiveElements(month_wuxing).restrains(yao_wuxing):
+                month_str.append("月建克")
+                base_force = YUE_JIAN_WEIGHTS["月建克"]
+            elif month_wuxing == yao_wuxing:
+                month_str.append("月帮扶")
+                base_force = YUE_JIAN_WEIGHTS["月帮扶"]
+            else:
+                month_str.append("月建无作用")
+                base_force = YUE_JIAN_WEIGHTS["无作用"]
+        
+        # 5. 爻旬空 修正（空亡则力量减半）.月建不存在旬空，月统三旬
+        if yao_dizhi in self.qigua_day_xunkong:
+            month_str.append(f"{guayao.name} 爻空亡")
+            yue_kong_coeff = 0.5
+        else:
+            yue_kong_coeff = 1
+        
+        # 6. 四时旺相系数修正（根据季节调整） 爻的五行 在当前季节是否旺相 (四时旺相)
+        # si_shi_coeff = SI_SHI[yao_wuxing][self.season]
+        wxxiusi = EarthlyBranch(month_dizhi).get_wangxiangxiuqiusi(yao_wuxing)
+        month_str.append(f"月建旺相状态：{wxxiusi}")
+        guayao.sishiwangxiang = wxxiusi
+        si_shi_coeff = SI_SHI[wxxiusi]
+        
+        # 7. 最终计算（基础力量 × 空亡系数 × 四时系数）
+        final_force = base_force * yue_kong_coeff * si_shi_coeff
+        guayao.month_score = (round(final_force, 4), month_str)
+        print(f"月建对{guayao.name}爻力量计算（基础力量{base_force} × 空亡系数{yue_kong_coeff} × 四时系数{si_shi_coeff}) 最终得分:{guayao.month_score}")
+
+        return (round(final_force, 4), month_str)
+
+    def _calc_day_score(self, guayao: GuaYao) -> (float, list[str]):
+        day_str = []
+
+        # 获取指定本卦指定爻对象
+        yao_dizhi = guayao.dizhi #爻地支
+        yao_wuxing = guayao.wuxing #爻五行
+
+        #日辰
+        day_dizhi = self.day_dizhi #日辰地支
+        day_wuxing = self.day_wuxing #日辰五行
+        base_force = 0.0
+        # 1. 优先判断临日建
+        if day_dizhi == yao_dizhi:
+            day_str.append("临日建")
+            base_force = RI_CHEN_WEIGHTS["临日建"]
+        elif yao_wuxing == day_wuxing:
+            day_str.append("日辰帮扶比和")
+            base_force = RI_CHEN_WEIGHTS["日帮扶"]
+        elif EarthlyBranch(day_dizhi).is_combined_with(yao_dizhi):
+            if guayao.dongyao:
+                day_str.append("日辰合动爻，动爻行动力受限")
+                base_force = RI_CHEN_WEIGHTS["日合动"]
+            else:
+                day_str.append("日辰合静爻，静爻变有力")
+                base_force = RI_CHEN_WEIGHTS["日合静"]
+        elif EarthlyBranch(day_dizhi).is_clashed_with(yao_dizhi):
+            # 日辰冲 
+            if guayao.sishiwangxiang in "旺相":
+                day_str.append("日辰冲旺相静爻")    
+                base_force = RI_CHEN_WEIGHTS["日冲"]
+            else:
+                day_str.append("日破")    
+                base_force = RI_CHEN_WEIGHTS["日破"]
+        elif FiveElements(day_wuxing).generates(yao_wuxing):
+            day_str.append("日辰生")
+            base_force = RI_CHEN_WEIGHTS["日生"]
+        elif FiveElements(day_wuxing).restrains(yao_wuxing):
+            day_str.append("日辰克")
+            base_force = RI_CHEN_WEIGHTS["日克"]
+        else:
+            day_str.append("日辰无作用")
+            base_force = RI_CHEN_WEIGHTS["无作用"]
+        
+        # 爻旬空 修正（空亡则力量减半）
+        if yao_dizhi in self.qigua_day_xunkong:
+            yao_kong_coeff = 0.5
+        else:
+            yao_kong_coeff = 1
+        
+        # 最终计算（基础力量 × 空亡系数）
+        final_force = base_force * yao_kong_coeff
+        guayao.day_score = (round(final_force, 4), day_str)
+        print(f"日辰对{guayao.name}爻力量计算（基础力量{base_force} × 空亡系数{yao_kong_coeff} 最终得分:{guayao.day_score}")
+        return (round(final_force, 4), day_str)
+
+
+    def _calc_dongyao_yongshen_score(self, dongyao: GuaYao, yongshen: GuaYao) -> (float, list[str]):
+        '''
+        计算所有动爻对用神爻的 力量得分（用神自己发动也加分），这里只计算当前的分，未计算未来分趋势分。
+        '''
+        dongyao_str = []
+        # 该动爻是用神，先不算分
+        if dongyao.yao_index == yongshen.yao_index:
+            return (0.0, ["动爻是用神，不加分"])
+
+        # 动爻有效性前置判定：月破 / 日破 / 旬空 / 入日月墓→E=0，跳过后续计算。
+        if EarthlyBranch(self.month_dizhi).is_clashed_with(dongyao.dizhi) or \
+            EarthlyBranch(self.day_dizhi).is_clashed_with(dongyao.dizhi) or \
+            dongyao.dizhi in self.qigua_day_xunkong or \
+            EarthlyBranch.get_changsheng_stage(self.month_dizhi, dongyao.wuxing) == "墓" or \
+            EarthlyBranch.get_changsheng_stage(self.day_dizhi, dongyao.wuxing) == "墓":
+            dongyao_str.append(f"{dongyao.name}动爻 月破/日破/旬空/入日月墓，不加分")
+            return (0.0, dongyao_str)
+
+        # 1. 动爻日月旺衰分（Sd）与旺衰系数（Ke）
+        month_score = self._calc_month_score(dongyao)[0]
+        day_score = self._calc_day_score(dongyao)[0]
+        base_force = month_score + day_score    
+        dongyao_str(f"动爻 {dongyao.name} 的日月旺衰总分（Sd）为：{base_force}")
+        if base_force >= 5.0:
+            coeff = 1.0
+        elif base_force >= 3.0:
+            coeff = 0.9
+        elif base_force >= 0.0:
+            coeff = 0.7
+        elif base_force >= -2.0:
+            coeff = 0.3
+        else:
+            coeff = 0.1
+
+        ## 看动爻对用神的 合冲 > 刑害 > 生克，计算基础分
+        base_force = 0.0
+        if FiveElements(dongyao.wuxing).generates(yongshen.wuxing):
+            dongyao_str.append(f"{dongyao.name}动爻 生 用神")
+            base_force += DONG_YAO_YUANSHEN_SCORE["生"]
+        elif FiveElements(dongyao.wuxing).restrains(yongshen.wuxing):
+            dongyao_str.append(f"{dongyao.name}动爻 克 用神")
+            base_force += DONG_YAO_YUANSHEN_SCORE["克"]
+        elif dongyao.wuxing == yongshen.wuxing:
+            dongyao_str.append(f"{dongyao.name}动爻 比和 用神")
+            base_force += DONG_YAO_YUANSHEN_SCORE["比和"]
+        elif EarthlyBranch(dongyao.dizhi).is_combined_with(yongshen.dizhi):
+            dongyao_str.append(f"{dongyao.name}动爻 合 用神")
+            base_force += DONG_YAO_YUANSHEN_SCORE["合"]
+        elif EarthlyBranch(dongyao.dizhi).is_clashed_with(yongshen.dizhi):
+            dongyao_str.append(f"{dongyao.name}动爻 冲 用神")
+            base_force += DONG_YAO_YUANSHEN_SCORE["冲"]
+        elif EarthlyBranch(dongyao.dizhi).is_punished_with(yongshen.dizhi):
+            dongyao_str.append(f"{dongyao.name}动爻 刑 用神")
+            base_force += DONG_YAO_YUANSHEN_SCORE["刑"]
+        elif EarthlyBranch(dongyao.dizhi).is_harmed_with(yongshen.dizhi):
+            dongyao_str.append(f"{dongyao.name}动爻 害 用神")
+            base_force += DONG_YAO_YUANSHEN_SCORE["害"]
+        
+        return (coeff * base_force, dongyao_str)
+
+    def _calc_yao_yao_score(self, master_yao: GuaYao, master_yao_coeff: float, target_yao: GuaYao) -> (float, list[str]):
+        '''
+        计算所有动爻对用神爻的 力量得分（用神自己发动也加分），这里只计算当前的分，未计算未来分趋势分。
+        计算主爻 对 目标爻的 力量分
+        例如： 应爻对用神爻的力量， 用神对应爻的力量
+        params:
+            master_yao: 主爻，一般是动爻
+            master_yao_coeff: 主爻的旺衰系数
+            target_yao: 目标爻，一般是用神爻
+        '''
+        yao_yao_str = []
+        # 两爻相同，不加分
+        if master_yao.yao_index == target_yao.yao_index:
+            return (0.0, [])
+
+        # 主爻有效性前置判定：月破 / 日破 / 旬空 / 入日月墓→E=0，跳过后续计算。
+        if EarthlyBranch(self.month_dizhi).is_clashed_with(master_yao.dizhi) or \
+            EarthlyBranch(self.day_dizhi).is_clashed_with(master_yao.dizhi) or \
+            master_yao.dizhi in self.qigua_day_xunkong or \
+            EarthlyBranch.get_changsheng_stage(self.month_dizhi, master_yao.wuxing) == "墓" or \
+            EarthlyBranch.get_changsheng_stage(self.day_dizhi, master_yao.wuxing) == "墓":
+            yao_yao_str.append(f"{master_yao.name}动爻 月破/日破/旬空/入日月墓，不加分")
+            return (0.0, yao_yao_str)
+
+        # 1. 动爻日月旺衰分（Sd）与旺衰系数（Ke）
+        month_score = self._calc_month_score(master_yao)[0]
+        day_score = self._calc_day_score(master_yao)[0]
+        base_force = month_score + day_score    
+        yao_yao_str(f"动爻 {master_yao.name} 的日月旺衰总分（Sd）为：{base_force}")
+        if base_force >= 5.0:
+            coeff = 1.0
+        elif base_force >= 3.0:
+            coeff = 0.9
+        elif base_force >= 0.0:
+            coeff = 0.7
+        elif base_force >= -2.0:
+            coeff = 0.3
+        else:
+            coeff = 0.1
+
+        ## 看动爻对用神的 合冲 > 刑害 > 生克，计算基础分
+        base_force = 0.0
+        if FiveElements(master_yao.wuxing).generates(target_yao.wuxing):
+            yao_yao_str.append(f"{master_yao.name}动爻 生 用神")
+            base_force += DONG_YAO_YUANSHEN_SCORE["生"]
+        elif FiveElements(master_yao.wuxing).restrains(target_yao.wuxing):
+            yao_yao_str.append(f"{master_yao.name}动爻 克 用神")
+            base_force += DONG_YAO_YUANSHEN_SCORE["克"]
+        elif master_yao.wuxing == target_yao.wuxing:
+            yao_yao_str.append(f"{master_yao.name}动爻 比和 用神")
+            base_force += DONG_YAO_YUANSHEN_SCORE["比和"]
+        elif EarthlyBranch(master_yao.dizhi).is_combined_with(target_yao.dizhi):
+            yao_yao_str.append(f"{master_yao.name}动爻 合 用神")
+            base_force += DONG_YAO_YUANSHEN_SCORE["合"]
+        elif EarthlyBranch(master_yao.dizhi).is_clashed_with(target_yao.dizhi):
+            yao_yao_str.append(f"{master_yao.name}动爻 冲 用神")
+            base_force += DONG_YAO_YUANSHEN_SCORE["冲"]
+        elif EarthlyBranch(master_yao.dizhi).is_punished_with(target_yao.dizhi):
+            yao_yao_str.append(f"{master_yao.name}动爻 刑 用神")
+            base_force += DONG_YAO_YUANSHEN_SCORE["刑"]
+        elif EarthlyBranch(master_yao.dizhi).is_harmed_with(target_yao.dizhi):
+            yao_yao_str.append(f"{master_yao.name}动爻 害 用神")
+            base_force += DONG_YAO_YUANSHEN_SCORE["害"]
+        
+        return (coeff * base_force, yao_yao_str)
+
+    def _calc_bianyao_coeff(self, guayao: GuaYao) -> (float, list[str]):
+        '''
+        1.硬判定优先：变爻若为月破、日破、旬空、入日月墓，直接有效系数 = 0，无生克权。
+        2.量化日月分：变爻先算月建分 + 日辰分，得到变爻日月净分（S）。
+        3.区间映射系数：按 S 的范围，对应不同有效系数，体现变爻旺衰对动爻的作用力度。
+        '''
+        bianyao_str = []
+        if EarthlyBranch(self.month_dizhi).is_clashed_with(guayao.dizhi):
+            bianyao_str.append(f"{guayao.dizhi}{guayao.wuxing}变爻 月破，系数为0，无生克权")
+        elif EarthlyBranch(self.day_dizhi).is_clashed_with(guayao.dizhi):
+            bianyao_str.append(f"{guayao.dizhi}{guayao.wuxing}变爻 日破，系数为0，无生克权")
+        elif guayao.dizhi in self.qigua_day_xunkong:
+            bianyao_str.append(f"{guayao.dizhi}{guayao.wuxing}变爻 旬空，系数为0，无生克权")
+        elif EarthlyBranch.get_changsheng_stage(self.month_dizhi, guayao.wuxing) == "墓":
+            bianyao_str.append(f"{guayao.dizhi}{guayao.wuxing}变爻 入月墓，系数为0，无生克权")
+        elif EarthlyBranch.get_changsheng_stage(self.day_dizhi, guayao.wuxing) == "墓":
+            bianyao_str.append(f"{guayao.dizhi}{guayao.wuxing}变爻 入日墓，系数为0，无生克权")
+        
+        if bianyao_str:
+            return (0.0, bianyao_str)
+        # 替换下一行
+        # if EarthlyBranch(self.month_dizhi).is_clashed_with(guayao.dizhi) or \
+        #     EarthlyBranch(self.day_dizhi).is_clashed_with(guayao.dizhi) or \
+        #     guayao.dizhi in self.qigua_day_xunkong or \
+        #     EarthlyBranch.get_changsheng_stage(self.month_dizhi, guayao.wuxing) == "墓" or \
+        #     EarthlyBranch.get_changsheng_stage(self.day_dizhi, guayao.wuxing) == "墓":
+        #     return 0.0
+        
+        # 2. 量化日月分
+        month_score = self._calc_month_score(guayao)[0]
+        day_score = self._calc_day_score(guayao)[0]
+        S = month_score + day_score
+        '''
+        系数映射表（符合六爻旺衰理法）
+        表格
+        净分区间（S）	旺衰等级	有效系数（K）	说明
+        S ≥ +6	极旺	1.0	日月全力生扶，变爻作用最强
+        +3 ≤ S ≤ +5	旺相	0.9	日月一方临值 / 生，一方帮扶，作用力强
+        0 ≤ S ≤ +2	平相	0.7	日月不生不克或轻微帮扶，作用力中等
+        -2 ≤ S ≤ -1	休囚	0.3	日月轻微克制，作用力弱
+        S ≤ -3	极衰	0.1	日月全力克制，作用力极弱（近乎无效）
+        '''
+
+        if S >= 6:
+            return 1.0
+        elif S >= 3:
+            return 0.9
+        elif S >= 0:
+            return 0.7
+        elif S >= -2:
+            return 0.3
+        else:
+            return 0.1
+
+    def calc_yinyao_yongshen_score(self):
+        '''
+        应爻对用神的得分 及关系
+        #### （一）核心判定维度（4 步走）
+            1. 应爻是否为用神：应爻临用神，事在对方手中，对方态度直接决定成败。
+            2. 应爻与用神的生克合冲：应爻生用神为助力，克用神为阻力，合为羁绊 / 助力，冲为变数。
+            3. 应爻的旺衰与动静：旺相则助力 / 阻力强，休囚则弱；发动则影响即时，静爻则被动。
+            4. 应爻的空破墓绝：空则不实，破则无力，墓则迟滞，绝则无救，直接削弱对用神的作用。
+        
+        
+        '''
+        yingyao_yongshen_str = []
+        if self.yingyao.yongshen:
+            yingyao_yongshen_str.append(f"{self.yingyao.name}应爻 临 用神 事在对方(或环境)手中，对方态度直接决定成败。")
+        
+        # else:
+            
+        # 2. 应爻的日月得分
+        # self.yinyao
+        yingyao_yongshen_str.append(f"{self.yingyao.name}应爻 月建分({self.yingyao.month_score[0]:.2f}) + 日辰分({self.yingyao.day_score[0]:.2f}) = 总得分()")
+        
+        #是否发动
+        if self.yingyao.dongyao == 1:
+            # 应爻发动， 查看变爻的系数
+            bianyao_coeff, bianyao_str = self._calc_bianyao_coeff(self.yingyao.bianyao)
+            yingyao_yongshen_str.append(f"变爻系数({bianyao_coeff:.2f})")
+            yingyao_yongshen_str.extend(bianyao_str)
+
+            # 应爻 的衰旺  日月分 + 动爻分 + 变爻系数 * 变化分
+
+            # 应爻 生克冲合 用神 得分
+
+        
+        print("\n".join(yingyao_yongshen_str))
+
+    def calc_yongshen_shi_score(self):
+        '''
+        用神对世爻的影响分
+        '''
+        pass
+    
+
+
+if __name__ == '__main__':
+    #test case
+    jiegua = Jiegua("2026-2-5", "111111", [3], "妻财", "半导体ETF 159813 基金明日涨跌情况")
+    # print(f"{jiegua.qigua_month_ganzhi}月 {jiegua.qigua_day_ganzhi}日 旬空({jiegua.qigua_day_xunkong})")
+    
+    jiegua.print_guahua()
+
+    # print(jiegua.bengua)
+    # jiegua.bengua.print_guaname()
+    # jiegua.bengua.print_guayao()
+    # print(jiegua.biangua)
+    # jiegua.biangua.print_guaname()
+    # jiegua.biangua.print_guayao()
+    print(jiegua.calc_shuaiwang())
