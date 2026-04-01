@@ -1,196 +1,21 @@
-from typing import List, Tuple, Optional, Set
+from __future__ import annotations
+from dataclasses import dataclass, field
+from abc import ABC, abstractmethod
+from typing import ClassVar, List, Tuple, Optional, Dict
 import yaml
 
 
-
-'''
-该文件定义了六爻预测的基本 类：
-GuaYao         卦爻每一爻的属性
-ChongGua       重卦
-FiveElements   五行
-EarthlyBranch  地支
-'''
-
-class GuaYao():
-    '''
-    重卦中的每一爻的信息封装
-    '''
-    def __init__(self, yao_index: int, yinyang: int, liuqin: str, dizhi: str, wuxing: str):
-        '''
-        :param yao_index: 爻序号(从下往上, 从1开始)
-        :param yinyang: 爻的阴阳(1表示阳爻，0表示阴爻)
-        :param chonggua: 卦对象
-        '''
-        self.yao_index = yao_index
-        self.yinyang = yinyang  # 1:阳爻, 0:阴爻
-        self.liuqin = liuqin    # 父母，兄弟，子孙，妻财，官鬼
-        self.dizhi = dizhi    # 地支
-        self.wuxing = wuxing  # 五行    
-        # self.chonggua = chonggua  #这里存储重卦对象，方便获取其整个重卦的信息
-        self.shiyao = 0      #是否 世爻
-        self.yingyao = 0     #是否 应爻
-        self.yongshen = 0    #是否 用神
-        self.dongyao = 0     #是否 动爻, 默认不是
-        self.bianyao = None  #如果是动爻，就有变爻
-
-        self.yuanshen = 0    #是否元神  （生 用神的爻）
-        self.jishen = 0      #是否忌神  （生 用神的爻）
-        self.choushen = 0    #是否仇神  （生 用神的爻）
-        self.sishiwangxiang = ""      #爻五行 在月建的 四时旺相,"旺,相,休,囚,死"
-        
-        self.month_score = (0.0, [])   # 月建 得分
-        self.day_score = (0.0, [])     # 日辰 得分
-        self.dongyao_score = (0.0, [])  # 动爻 得分
-
-        self.__init_name()
-
-    def __init_name(self):
-        '''爻辞中的，六、九分别代表阴、阳， 六三、九二后面的数字代表的是从下到上，以此爻的顺序位置'''
-        yinyang_name = "九" if self.yinyang == 1 else "六"
-        if self.yao_index == 1:
-            self.name = f"初{yinyang_name}"
-        elif self.yao_index == 2:
-            self.name = f"{yinyang_name}二"
-        elif self.yao_index == 3:
-            self.name = f"{yinyang_name}三"
-        elif self.yao_index == 4:
-            self.name = f"{yinyang_name}四"
-        elif self.yao_index == 5:
-            self.name = f"{yinyang_name}五"
-        elif self.yao_index == 6:
-            self.name = f"上{yinyang_name}"
-
-    def set_shiyao(self, shiyao: int = 1):
-        self.shiyao = shiyao
-    
-    def set_yingyao(self, ying: int = 1):
-        self.yingyao = ying
-    
-    def set_yongshen(self, yongshen: int = 1):
-        self.yongshen = yongshen
-
-    def set_dongyao(self, dong: int = 1):
-        self.dongyao = dong
-
-    def __str__(self) -> str:
-        return self.get_yao_str()
-
-    def get_yao_str(self) -> str:
-        str = self.name + ' '
-        if self.yinyang == 1:
-            str += '▄▄▄▄▄▄'  
-        else:
-            str += '▄▄  ▄▄'
-
-        str += ' ' + self.liuqin
-        str += ' ' + self.dizhi
-        str += self.wuxing
-
-        if self.shiyao == 1:
-            str += ' ' + '世'
-        elif self.yingyao == 1:
-            str += ' ' + '应'
-        else:
-            str += ' ' + '  '
-        
-        if self.yongshen == 1:
-            str += ' ' + '用神'
-        else:
-            str += ' ' + '    '
-
-        if self.dongyao == 1:
-            str += ' ---->'
-        else:
-            str += '      '
-        return str
-
-class ChongGua():
-    def __init__(self, guayaos: str, dongyao: list[int] = []):
-        self.guayaos = guayaos # 卦爻(从下往上，从1开始）格式 010100
-        self.name = ''     # 卦名称
-        self.guagong = '乾宫' # 卦宫位
-        self.guagong_yingyang = guayaos # 卦宫阴阳
-        self.guagong_wuxing = [] # 卦宫五行
-        self.dongyao = dongyao   # 动爻位置(从下往上，从1开始）
-        self.dizhi = []          # 爻地支 (从下往上）
-        self.liuqin = []         # 爻六亲 (从下往上）
-        self.shiyao = 0          # 世爻位置(从下往上，从1开始）
-        self.yingyao = 0         # 应爻位置(从下往上，从1开始）
-        self.yaos = []         # 卦爻(从下往上，从1开始）对象列表 list[GuaYao]
-        self.__init_chonggua(guayaos, dongyao)
-
-    def __init_chonggua(self, guayaos: str, dongyao: list[int] = []):
-        yaml_file_path = 'bagua.yaml'
-        with open(yaml_file_path, "r", encoding="utf-8") as f:
-            data = yaml.safe_load(f)
-
-        for palace_data in data:
-            for palace_name, palace_content in palace_data.items():
-                # 验证每卦
-                for idx, gua in enumerate(palace_content["八卦"]):
-                    if guayaos == gua['六爻']:
-                        self.name = gua['名称']
-                        self.guagong = palace_name
-                        self.guagong_yingyang = palace_content['阴阳']
-                        self.guagong_wuxing = palace_content['五行']
-                        self.liuqin = gua['六亲']
-                        self.dizhi = gua['地支']
-                        self.wuxing = gua['五行']
-                        self.shiyao = gua['世爻']
-                        self.yingyao = gua['应爻']
-                        break 
-        # 初始化每一爻对象
-        for i in range(1, 7):
-            guayao = GuaYao(i, int(guayaos[i - 1]), self.liuqin[i - 1], self.dizhi[i - 1], self.wuxing[i - 1])
-            if i in dongyao:
-                guayao.dongyao = 1
-            if i == self.yingyao:
-                guayao.yingyao = 1
-            if i == self.shiyao:
-                guayao.shiyao = 1
-            self.yaos.append(guayao)
-
-    def get_yao(self, yao_index: int) -> GuaYao:
-        '''
-        获取指定爻的字符串表示
-        :param yao_index: 爻序号(从下往上, 从1开始)
-        '''
-        return self.yaos[yao_index - 1]
-        # return {
-        #     "爻": self.guayao[yao_index - 1], #1表示阳爻，0表示阴爻
-        #     "地支": self.dizhi[yao_index - 1],
-        #     "五行": self.wuxing[yao_index - 1],
-        #     "六亲": self.liuqin[yao_index - 1],
-        #     "动静": "动" if yao_index in self.dongyao else "静",
-        #     "世爻": "是" if yao_index == self.shiyao else "否",
-        #     "应爻": "是" if yao_index == self.yingyao else "否",
-        #     "用神": "是" if yao_index == self.yingyao else "否"
-        # }
-    
-    def print_guaname(self):
-        print("%10s" % self.name)
-    def print_guayao(self):
-        for i in range(6, 0, -1):
-            print(self.get_yao_str(i))
-
-    def get_yao_str(self, yao_index: int) -> str:
-        '''
-        获取指定爻的字符串表示
-        :param yao_index: 爻序号(从下往上, 从1开始)
-        '''
-        if yao_index < 1 or yao_index > 6:
-            raise ValueError("爻序号必须在1到6之间")
-        return self.get_yao(yao_index).get_yao_str()
-
+@dataclass
 class FiveElements:
     """
     五行生克关系封装类
     核心功能：生克判断、旺衰计算、五行对应转换、基础刑冲合害判定
     """
+    element: str
     # 基础配置：五行顺序、生克关系、旺相休囚死（按四季）
-    ELEMENTS = ["木", "火", "土", "金", "水"]
-    GENERATION = {"木": "火", "火": "土", "土": "金", "金": "水", "水": "木"}  # 生
-    RESTRAINT = {"木": "土", "火": "金", "土": "水", "金": "木", "水": "火"}  # 克
+    ELEMENTS: ClassVar[List[str]] = ["木", "火", "土", "金", "水"]
+    GENERATION: ClassVar[Dict[str, str]] = {"木": "火", "火": "土", "土": "金", "金": "水", "水": "木"}  # 生
+    RESTRAINT: ClassVar[Dict[str, str]] = {"木": "土", "火": "金", "土": "水", "金": "木", "水": "火"}  # 克
     # 五行对应：地支/四季/方位（可扩展）
     BRANCH_MAP = {
         "木": ["寅", "卯"],
@@ -203,12 +28,11 @@ class FiveElements:
     # 旺相休囚死评分（越高越旺）
     PROSPERITY_SCORE = {"旺": 3, "相": 2, "休": 1, "囚": 0, "死": -1}
 
-    def __init__(self, element: str):
+    def __post_init__(self):
         """
         初始化五行对象
         :param element: 五行（木/火/土/金/水），大小写不敏感
         """
-        self.element = element.strip()
         if self.element not in self.ELEMENTS:
             raise ValueError(f"无效五行：{self.element}，仅支持{self.ELEMENTS}")
 
@@ -251,6 +75,29 @@ class FiveElements:
     def get_prosperity_status(self, season: str) -> str:
         """
         根据季节判断五行旺相休囚死状态
+        五行随四季（春、夏、秋、冬）更替，呈现五种状态。六爻中土的规则特殊，需单独记忆。
+        <pre>
+        表格
+        状态	定义	核心逻辑
+        旺	当令得时	季节的主宰，能量最强（如木在春）。
+        相	辅佐得势	被旺者所生（如火在春，木生火），能量次强。
+        休	退休卸任	生旺者（如水在春，水生木），能量退隐，平和。
+        囚	被克受制	克旺者（如金在春，金克木），被旺气反制，能量最弱。
+        死	被泄无气	旺者所克（如土在春，木克土），能量被泄尽。
+        1. 五行四季旺衰总表（六爻实战标准）  
+        这是六爻断卦的绝对标准，请以此为准进行编码。
+        表格
+        五行	春季 (木旺)	夏季 (火旺)	秋季 (金旺)	冬季 (水旺)	四季末 (土旺)
+        木	     旺	        休	        死	        相	      囚
+        火	     相	        旺	        囚	        死	      休
+        土	     死	        相	        休	        囚	      旺
+        金	     囚	        死	        旺	        休	      相
+        水	     休	        囚	        相	        旺	      死
+        2. 关键特殊规则（编程必看）
+        土的特殊性：土不主某一个完整季节，而是主四季的最后 18 天（辰、未、戌、丑月）。在六爻量化中，为了简化计算，通常将辰、戌、丑、未这四个月直接判定为 “土旺”。
+        三合局优先：若卦中形成三合局（如申子辰水局），局中五行的旺衰会被局气加持，优先级高于季节旺衰。
+        </pre>
+
         :param season: 季节（春/夏/四季/秋/冬）
         :return: 旺/相/休/囚/死
         """
@@ -307,13 +154,19 @@ class FiveElements:
         return self.restrains(target_element) or self.is_restrained_by(target_element)
 
 
-
+@dataclass
 class EarthlyBranch:
     """
     十二地支核心类（修正版）
     核心修复：三合局由「三会」改为六爻标准「长生-帝旺-墓库」组合
     功能：冲/合/刑/害全判定、五行归属、季节对应、月份映射、三合局批量判断等
     """
+    #构造函数必填参数
+    branch: str
+
+    _element: str | None = None
+    _month: str | None = None
+    _month_season: str | None = None
     # 基础配置：十二地支全量列表
     BRANCHES = ["子", "丑", "寅", "卯", "辰", "巳", "午", "未", "申", "酉", "戌", "亥"]
     
@@ -376,17 +229,31 @@ class EarthlyBranch:
     STAGES = ["长生", "沐浴", "冠带", "临官", "帝旺",
               "衰", "病", "死", "墓", "绝", "胎", "养"]
     # 五行长生起点
-    CHANGSHENG_START = {
+    # 土为什么不长生在巳？ 记住“火土同源，生旺同步”
+    # 金为什么不长生在土（丑辰未戌）？巳虽属火，但其内藏天干为‌丙（火）、戊（土）、庚（金）‌，其中庚金为金之本气，故巳火并非纯火，而是“火中含金”，可煅炼金成器。 金气始于夏初（巳月），此时阳气渐盛、火土相生，为金提供“待时而发”的生机，而非盛夏（午月）的极端燥热
+    # 丑辰未戌 属四墓库，功能是收、藏、止；代表五行气的终结或归宿，而非初生。
+    ZHANGSHENG_START = {
         "木": "亥",
         "火": "寅",
-        "土": "寅",
-        "金": "巳",
+        "土": "寅",  #为什么不长生在巳？ 记住“火土同源，生旺同步”
+        "金": "巳",  
         "水": "申"
     }
 
-    def __init__(self, branch: str):
-        """初始化地支对象，严格校验输入"""
-        self.branch = branch.strip()
+    # 10. 地支→化变类型, 化进神
+    HUAJIN_TYPE: ClassVar[dict[str, str]] = {
+        "寅": "卯",
+        "巳": "午",
+        "申": "酉",
+        "子": "亥",
+        "丑": "辰", #丑 → 辰
+        "辰": "未", # 辰 → 未
+        "未": "戌", # 未 → 戌
+    }
+
+
+    def __post_init__(self):
+        """__init__函数后， 严格校验输入"""
         if self.branch not in self.BRANCHES:
             raise ValueError(f"无效地支：{self.branch}，仅支持{self.BRANCHES}")
         
@@ -409,12 +276,12 @@ class EarthlyBranch:
         """获取当前地支对应的季节（春/夏/秋/冬）"""
         return self.season
 
-    # ========== 冲合刑害判定 ==========
     def _validate_target_branch(self, target_branch: str) -> None:
         """私有辅助：校验目标地支合法性"""
         if target_branch not in self.BRANCHES:
             raise ValueError(f"无效目标地支：{target_branch}，仅支持{self.BRANCHES}")
 
+    # ========== 冲合刑害判定 ==========
     def is_combined_with(self, target_branch: str) -> bool:
         """判断当前地支是否与目标地支六合"""
         self._validate_target_branch(target_branch)
@@ -469,7 +336,7 @@ class EarthlyBranch:
             return "相"
         elif month_wuxing.is_generated_by(wuxing):
             return "休"
-        elif month_wuxing.is_restrained_by(wuxing):
+        elif month_wuxing.restrains(wuxing):
             return "囚"
         else:
             return "死"
@@ -554,12 +421,12 @@ class EarthlyBranch:
         return None
 
     @classmethod
-    def get_changsheng_stage(cls, branch: str, element: str) -> str:
+    def get_zhangsheng_stage(cls, branch: str, element: str) -> str:
         """返回五行 在地支的 十二长生 阶段"""
-        if element not in cls.CHANGSHENG_START:
+        if element not in cls.ZHANGSHENG_START:
             raise ValueError("无效五行")
 
-        start_branch = cls.CHANGSHENG_START[element]
+        start_branch = cls.ZHANGSHENG_START[element]
 
         current_index = cls.BRANCHES.index(branch)
         start_index = cls.BRANCHES.index(start_branch)
@@ -567,63 +434,701 @@ class EarthlyBranch:
         stage_index = (current_index - start_index) % 12
 
         return cls.STAGES[stage_index]
+    @classmethod
+    def is_hua_jin(cls, dongyao_branch: str, bianyao_branch: str) -> bool:
+        """判断 动爻 跟 变爻 是否是化进神 """
+        return cls.HUAJIN_TYPE.get(dongyao_branch) == bianyao_branch
+    
+    @classmethod
+    def is_hua_tui(cls, dongyao_branch: str, bianyao_branch: str) -> bool:
+        """判断 动爻 跟 变爻 是否是化退神 """
+        return cls.HUAJIN_TYPE.get(bianyao_branch) == dongyao_branch
 
 
+@dataclass
+class GuaYao():
+    '''
+    重卦中的每一爻的信息封装类
+    '''
+    yao_index: int  # 爻序号(从下往上, 从1开始)
+    yinyang: int  # 爻的阴阳(1表示阳爻，0表示阴爻)
+    liuqin: str  # 父母，兄弟，子孙，妻财，官鬼
+    branch: str  # 地支
+    element: str  # 五行
 
-# ------------------------------
-# 测试用例（可直接运行验证）
-# ------------------------------
-if __name__ == "__main__":
-    # 1. 生克判断
-    wood = FiveElements("木")
-    print("=== 生克判断 ===")
-    print(f"木生火：{wood.generates('火')}")          # True
-    print(f"木克土：{wood.restrains('土')}")          # True
-    print(f"木被水生：{wood.is_generated_by('水')}")  # True
-    print(f"木被金克：{wood.is_restrained_by('金')}") # True
+    shiyao: bool = field(init=False, default=False)      #是否 世爻
+    yingyao: bool = field(init=False, default=False)    #是否 应爻
+    yongshen: bool = field(init=False, default=False)   #是否 用神
+    dongyao: bool = field(init=False, default=False)     #是否 动爻, 默认不是
+    bianyao: GuaYao = field(init=False, default=None)  #如果是动爻，就有变爻, 存储 变爻对象
+    hua_type: str = field(init=False, default="")   #化变类型: 化进神，化退神，化回头生，化回头克，化空，化破，化墓，化绝, 化绝，化死
+    
+    xunkong: bool = field(init=False, default=False)    #是否 旬空
+    xunkong_type: str = field(init=False, default='不空')  #旬空类型: 三个值：不空, 真空，假空
 
-    # 2. 旺衰判断
-    print("\n=== 旺衰判断 ===")
-    print(f"木在春季的状态：{wood.get_prosperity_status('春')}")  # 旺
-    print(f"木在春季的得分：{wood.get_prosperity_score('春')}")  # 3
-    print(f"木在秋季的状态：{wood.get_prosperity_status('秋')}")  # 囚
-    print(f"木在秋季的得分：{wood.get_prosperity_score('秋')}")  # 0
+    yuanshen: bool = field(init=False, default=False)    #是否元神  （生 用神的爻）
+    jishen: bool = field(init=False, default=False)      #是否忌神  （克 用神的爻）
+    choushen: bool = field(init=False, default=False)    #是否仇神  （生 忌神的爻）
+    # sishiwangxiang = ""      #爻五行 在月建的 四时旺相,"旺,相,休,囚,死"
+    # month_score = (0.0, [])   # 月建 得分
+    # day_score = (0.0, [])     # 日辰 得分
+    # dongyao_score = (0.0, [])  # 动爻 得分
+    # forces = []  # 所有作用的得分, 数组， 保存 接口 ForceInterface 实现类
+    forces: list[ForceInterface] = field(init=False, default_factory=list)
+    score: float = field(init=False, default=0.0) # 所有作用力得分的总和
 
-    # 3. 地支对应与冲合
-    print("\n=== 地支对应与冲合 ===")
-    print(f"木对应的地支：{wood.get_branches()}")        # ["寅","卯"]
-    print(f"寅与卯合：{wood.is_combination('卯')}")      # True
-    print(f"寅与申冲：{wood.is_clash('申')}")            # True
+    def __post_init__(self):
+        # self.chonggua = chonggua  #这里存储重卦对象，方便获取其整个重卦的信息
+        self.__init_name()
 
-    # 4. 异常测试（无效五行）
-    try:
-        invalid = FiveElements("风")
-    except ValueError as e:
-        print(f"\n异常测试：{e}")  # 无效五行：风，仅支持['木','火','土','金','水']
+    def __init_name(self):
+        '''爻辞中的，六、九分别代表阴、阳， 六三、九二后面的数字代表的是从下到上，以此爻的顺序位置'''
+        yinyang_name = "九" if self.yinyang == 1 else "六"
+        if self.yao_index == 1:
+            self.name = f"初{yinyang_name}"
+        elif self.yao_index == 2:
+            self.name = f"{yinyang_name}二"
+        elif self.yao_index == 3:
+            self.name = f"{yinyang_name}三"
+        elif self.yao_index == 4:
+            self.name = f"{yinyang_name}四"
+        elif self.yao_index == 5:
+            self.name = f"{yinyang_name}五"
+        elif self.yao_index == 6:
+            self.name = f"上{yinyang_name}"
+
+    def add_force(self, force: ForceInterface):
+        '''添加作用力'''
+        self.score += force.get_score()
+        self.forces.append(force)
+
+    def get_score(self):
+        return self.score
+    
+    def set_shiyao(self, shiyao: bool = True):
+        self.shiyao = shiyao
+    
+    def set_yingyao(self, ying: bool = True):
+        self.yingyao = ying
+    
+    def set_yongshen(self, yongshen: bool = True):
+        self.yongshen = yongshen
+
+    def set_bianyao(self, bianyao: GuaYao):
+        self.dongyao = True
+        self.bianyao = bianyao
+
+    def set_xunkong(self, xunkong: bool = True):
+        self.xunkong = xunkong
+
+    def set_xunkong_type(self, xunkong_type: str = '不空'):
+        self.xunkong_type = xunkong_type
+
+    def get_month_force(self):
+        '''获取月建作用力'''
+        return next(a for a in self.forces if a.get_type() == "月建生克冲合刑害")
+    def get_day_force(self):
+        '''获取日辰作用力'''
+        return next(a for a in self.forces if a.get_type() == "日建生克冲合刑害")
+
+    def __str__(self) -> str:
+        return self.get_yao_str()
+
+    def get_yao_str(self) -> str:
+        str = self.name + ' '
+        if self.yinyang == 1:
+            str += '▄▄▄▄▄▄'  
+        else:
+            str += '▄▄  ▄▄'
+
+        str += ' ' + self.liuqin
+        str += ' ' + self.branch
+        str += self.element
+
+        if self.shiyao == 1:
+            str += ' ' + '世'
+        elif self.yingyao == 1:
+            str += ' ' + '应'
+        else:
+            str += ' ' + '  '
+        
+        if self.yongshen == 1:
+            str += ' ' + '用神'
+        elif self.yuanshen == 1:
+            str += ' ' + '用神'
+        elif self.jishen == 1:
+            str += ' ' + '忌神'
+        elif self.choushen == 1:
+            str += ' ' + '仇神'
+        else:
+            str += ' ' + '    '
+
+        if self.dongyao == 1:
+            str += ' ---->'
+        else:
+            str += '      '
+        return str
+
+@dataclass
+class ChongGua():
+    '''
+    重卦的信息封装类,又叫别挂， 由两个经卦上下组合而成。从下往上分别是初爻，二爻...五爻，上爻
+    '''
+    guayao_str: str # 卦爻(从下往上，从1开始）格式 010100
+    dongyao_list: List[int] | None = None # 动爻位置列表(从下往上，从1开始）
+
+    name: str = None     # 卦名称
+    guagong: str = None  # 卦宫位
+    guagong_yingyang: str = None  # 卦宫阴阳
+    guagong_element: str = None  # 卦宫五行
+    dizhi: list[str] = field(init=False, default_factory=list)          # 爻地支 (从下往上）
+    liuqin: list[str] = field(init=False, default_factory=list)         # 爻六亲 (从下往上）
+    shiyao: int = field(init=False, default=0)          # 世爻位置(从下往上，从1开始）
+    yingyao: int = field(init=False, default=0)         # 应爻位置(从下往上，从1开始）
+    yaos: list[GuaYao] = field(init=False, default_factory=list)           # 卦爻(从下往上，从1开始）对象列表 list[GuaYao]
+
+    def __post_init__(self):
+        if self.dongyao_list is None:
+            self.dongyao_list = []
+        self.__load_bugua_yaml_file()
+        # self.__init_name()
+        # self.__init_guayao()
+        # self.__init_guagong()
+        # self.__init_dizhi()
+        # self.__init_liuqin()
+        # self.__init_shiyao()
+        # self.__init_yingyao()
+        # self.__init_yaos()
+
+    def __load_bugua_yaml_file(self):
+        yaml_file_path = 'bagua.yaml'
+        with open(yaml_file_path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+
+        for palace_data in data:
+            for palace_name, palace_content in palace_data.items():
+                # 验证每卦
+                for idx, gua in enumerate(palace_content["八卦"]):
+                    if self.guayao_str == gua['六爻']:
+                        self.name = gua['名称']
+                        self.guagong = palace_name
+                        self.guagong_yingyang = palace_content['阴阳']
+                        self.guagong_element = palace_content['五行']
+                        self.liuqin = gua['六亲']
+                        self.dizhi = gua['地支']
+                        self.wuxing = gua['五行']
+                        self.shiyao = gua['世爻']
+                        self.yingyao = gua['应爻']
+                        break 
+        # 初始化每一爻对象
+        for i in range(1, 7):
+            guayao = GuaYao(i, int(self.guayao_str[i - 1]), self.liuqin[i - 1], self.dizhi[i - 1], self.wuxing[i - 1])
+            if i in self.dongyao_list:
+                guayao.dongyao = 1
+            if i == self.yingyao:
+                guayao.yingyao = 1
+            if i == self.shiyao:
+                guayao.shiyao = 1
+            self.yaos.append(guayao)
+
+    def get_yao(self, yao_index: int) -> GuaYao:
+        '''
+        获取指定爻的字符串表示
+        :param yao_index: 爻序号(从下往上, 从1开始)
+        '''
+        return self.yaos[yao_index - 1]
+
+    def print_guaname(self):
+        print("%10s" % self.name)
+
+    def print_guayao(self):
+        for i in range(6, 0, -1):
+            print(i)
+            print(self.get_yao_str(i))
+
+    def get_yao_str(self, yao_index: int) -> str:
+        '''
+        获取指定爻的字符串表示
+        :param yao_index: 爻序号(从下往上, 从1开始)
+        '''
+        if yao_index < 1 or yao_index > 6:
+            raise ValueError("爻序号必须在1到6之间")
+        return self.get_yao(yao_index).get_yao_str()
 
 
+############################################################################
+
+class ForceInterface(ABC):
+    '''
+    定义作用接口， 作用来源，作用类型，作用名称，作用力量
+    '''
+    @abstractmethod
+    def get_source(self) -> any:
+        """获取作用来源， 一般为月建，日辰，变爻，动爻，静爻
+        如果是爻， 就会返回爻的对象"""
+        pass
+    
+    @abstractmethod
+    def get_type(self) -> str:
+        """获取作用类型,一般为 生克冲合刑害， 四时旺相， 十二长生"""
+        pass
+
+    @abstractmethod
+    def get_name(self) -> str:
+        """获取作用名称,例如月建克， 日建合绊"""
+        pass
+    @abstractmethod
+    def get_score(self) -> float:
+        """获取作用力量得分"""
+        pass
+
+@dataclass
+class MonthForce(ForceInterface):
+    '''
+    月建 作用力量类型 生克冲合刑害, 本质是地支间的 “互动关系”
+    '''
+    yue_branch: str  # 月建 地支
+    yao_branch: str  # 爻 地支
+    #下面的都是私有属性
+    _month_element: str = field(init=False) # 月建五行
+    _yao_element: str = field(init=False, default="")  # 月建五行
+
+    type: str = field(init=False, default="月建生克冲合刑害")
+
+    name: str | None = None  # 作用类型名称：
+    score: float = 0.0  # 作用力量：0.0-10.0
+
+    # 类属性
+    # 作用类型名称
+    MON_FORCE_TYPE: ClassVar[dict[str, float]] = {
+        "临月建":   5.0,    # 地支相同, 力量最强（得令）
+        "月破":     -5.0,     # 地支相冲
+        "月建生合": 4.5,   # 地支相合， 且五行生爻的五行
+        "月建克合": -2.5,   # 地支克合， 且五行克爻的五行, 克中带合，衰而不死（比纯克轻）
+        "月建合起": 3.0,     # 地支相合，爻如果 休囚无气，就是合起，  判 “休囚 / 衰弱”：爻无月日生扶、四时休囚 / 死、十二长生为墓 / 绝
+        "月建合绊": -1.5,     # 地支相合，爻如果旺向有用， 就是合绊， 判 “旺相 / 有用”：爻得月日生扶、四时旺 / 相、十二长生为长生 / 帝旺，或本身是动爻
+        "月建生":   3.5,     
+        "月建比和": 4.0,     # 五行相同但地支不同（如寅月卯木），帮扶力较弱 
+        "月建克":   -3.0,
+        "月建刑":   -2.0,
+        "月建害":   -1.0,
+        "月建无作用": 0.0,
+    }
+
+    def __post_init__(self):
+        '''
+        计算月建对爻的 生克冲合 作用及力量得分
+        '''
+        self._month_element = EarthlyBranch(self.yue_branch).element
+        self._yao_element = EarthlyBranch(self.yao_branch).element
+        
+        if self.yue_branch == self.yao_branch:
+            self.name = "临月建"
+        elif EarthlyBranch(self.yue_branch).is_clashed_with(self.yao_branch):
+            self.name = "月破"
+        elif EarthlyBranch(self.yue_branch).is_combined_with(self.yao_branch) and FiveElements(self._month_element).generates(self._yao_element):
+            self.name = "月建生合"
+        elif EarthlyBranch(self.yue_branch).is_combined_with(self.yao_branch) and FiveElements(self._month_element).restrains(self._yao_element):
+            self.name = "月建克合"
+        elif FiveElements(self._month_element).generates(self._yao_element):
+            self.name = "月建生"
+        elif FiveElements(self._month_element).restrains(self._yao_element):
+            self.name = "月建克"
+        elif self._month_element == self._yao_element:
+            self.name = "月建比和"  # 又叫比和， 
+        elif EarthlyBranch(self.yue_branch).is_combined_with(self.yao_branch):
+            self.name = "月建合起"  # 这里要算完所有的爻的旺衰状态， 再判断是否是合起，还是合绊
+        elif EarthlyBranch(self.yue_branch).is_punished_with(self.yao_branch):
+            self.name = "月建刑"
+        elif EarthlyBranch(self.yue_branch).is_harmed_with(self.yao_branch):
+            self.name = "月建害"
+        else:
+            self.name = "月建无作用"
+        self.score = self.MON_FORCE_TYPE.get(self.name, 0.0)
+
+    def get_source(self):
+        return "月建" + self.yue_branch
+    
+    def get_name(self):
+        return self.name
+    def get_score(self):
+        return self.score
+    def get_type(self):
+        return self.type
 
 
-# ------------------------------
-# 修正后的测试用例（关键验证）
-# ------------------------------
+    @classmethod
+    def force(cls, month_branch: str, yao_branch: str) -> float:
+        """根据月建地支和爻的地支，返回作用力量"""
+        pass
 
-    print("=== 核心修正：三合局判定 ===")
-    # 正确三合局（应返回True）
-    print(f"申子辰合水局：{EarthlyBranch.is_triad_combination(['申','子','辰'])}")  # True
-    print(f"寅午戌合火局：{EarthlyBranch.is_triad_combination(['寅','午','戌'])}")  # True
-    print(f"亥卯未合木局：{EarthlyBranch.is_triad_combination(['亥','卯','未'])}")  # True
-    print(f"巳酉丑合金局：{EarthlyBranch.is_triad_combination(['巳','酉','丑'])}")  # True
+@dataclass
+class MonthSishiForce(ForceInterface):
+    '''
+    月建 作用力量类型 四时旺向, 本质是季节对五行的先天赋能	五行的 “先天势力”
+    '''
+    yue_branch: str  # 月建 干支
+    yao_branch: str  # 爻 地支
+    #下面的都是私有属性
+    _month_element: str = field(init=False) # 月建五行
+    _yao_element: str = field(init=False, default="")  # 月建五行
 
-    # 错误组合（原三会局，应返回False）
-    print(f"寅卯辰（旧错误组合）：{EarthlyBranch.is_triad_combination(['寅','卯','辰'])}")  # False
+    type: str = "四时旺相" #field(init=False, default="四时旺相")
+    name: str | None = None  # 作用类型名称：
+    score: float = 0.0  # 作用力量：0.0-10.0
 
-    # 三合局类型测试
-    print(f"申子辰的五行类型：{EarthlyBranch.get_triad_type(['申','辰','子'])}")  # 水
+    # 类属性
+    # 作用类型名称
+    MON_FORCE_TYPE: ClassVar[dict[str, float]] = {
+        "旺":   1.0,    # 地支相同, 当令者旺
+        "相":   0.5,     # 生我者相
+        "休":   0.0,   # 我生者休
+        "囚":  -0.5,   # 克我者囚
+        "死":  -1.0,     # 我克者死
+    }
 
-    # 冲合刑害测试（不受影响，正常生效）
-    print("\n=== 冲合刑害验证 ===")
-    zi = EarthlyBranch("子")
-    mao = EarthlyBranch("卯")
-    print(f"子卯无礼刑：{zi.is_punished_with('卯')}")  # True
-    print(f"子未六害：{zi.is_harmed_with('未')}")       # True
+    def __post_init__(self):
+        '''
+        计算月建对爻的 生克冲合 作用及力量得分
+        '''
+        self._month_element = EarthlyBranch(self.yue_branch).element
+        self._yao_element = EarthlyBranch(self.yao_branch).element
+        
+        if self._month_element == self._yao_element:
+            self.name = "旺"
+        elif FiveElements(self._month_element).generates(self._yao_element):
+            self.name = "相"
+        elif FiveElements(self._month_element).is_generated_by(self._yao_element):
+            self.name = "休"
+        elif FiveElements(self._month_element).is_restrained_by(self._yao_element):
+            self.name = "囚"
+        elif FiveElements(self._month_element).restrains(self._yao_element):
+            self.name = "死"
+        self.score = self.MON_FORCE_TYPE.get(self.name, 0.0)
+
+    def get_source(self):
+        return "月建" + self.yue_branch
+    
+    def get_name(self):
+        return self.name
+    def get_score(self):
+        return self.score
+    def get_type(self):
+        return self.type
+
+@dataclass
+class ZhangshengForce(ForceInterface):
+    '''
+    月建/日辰 作用力量类型 十二长生, 本质是季节对五行的先天赋能	五行的 “先天势力”
+    '''
+    source_branch: str  # 月建/日辰/变爻 地支
+    target_branch: str  # 爻 地支
+    source: str = "月建"    #或日辰
+    type: str = "十二长生"
+    name: str | None = None  # 作用类型名称：
+    score: float = 0.0  # 作用力量：0.0-10.0
+    
+    #下面的都是私有属性
+    _source_element: str = field(init=False) # 月建五行
+    _target_element: str = field(init=False, default="")  # 月建五行
+
+
+    # 类属性
+    # 作用类型名称
+    ZHANGSHENG_FORCE_TYPE: ClassVar[dict[str, float]] = {
+        "长生":   0.8,     # 
+        "沐浴":   0.2,     # 
+        "冠带":   0.4,     # 
+        "临官":   0.7,
+        "帝旺":   1.0,
+        "衰":    -0.3,
+        "病":    -0.5,
+        "死":    -0.8,
+        "墓":    -0.7,
+        "绝":    -1.0,
+        "胎":     0.1,
+        "养":     0.3,
+    }
+
+    def __post_init__(self):
+        '''
+        计算十二长生对爻的 作用及力量得分
+        '''
+        self._source_element = EarthlyBranch(self.source_branch).element
+        self._target_element = EarthlyBranch(self.target_branch).element
+        
+        self.name = EarthlyBranch.get_zhangsheng_stage(self.source_branch, self._target_element)
+        self.score = self.ZHANGSHENG_FORCE_TYPE.get(self.name, 0.0)
+
+    def get_source(self):
+        return self.source
+    def get_name(self):
+        return self.name
+    def get_score(self):
+        return self.score
+    def get_type(self):
+        return self.type
+
+@dataclass
+class DayForce(ForceInterface):
+    '''
+    日建 作用力量类型 生克冲合刑害, 本质是地支间的 “互动关系”
+    日建不看 四时旺相休囚， 只看生克冲合 和 十二长生
+    '''
+    day_branch: str  # 日建 干支
+    yao_branch: str  # 爻 地支
+    source: str = "日辰"    #或日建
+    #下面的都是私有属性
+    _day_element: str = field(init=False) # 日建五行
+    _yao_element: str = field(init=False, default="")  # 爻五行
+
+    type: str = field(init=False, default="日建生克冲合刑害")
+
+    name: str | None = None  # 作用类型名称：
+    score: float = 0.0  # 作用力量：0.0-10.0
+
+    # 类属性
+    # 作用类型名称
+    MON_FORCE_TYPE: ClassVar[dict[str, float]] = {
+        "临日建":   5.0,    # 地支相同, 力量最强（得令）
+        "日破":     -5.0,   # 地支相冲， 日冲休囚无气的静爻， 为日破； 日地支相冲 分三种： 暗动，日破，冲散；
+        "日冲暗动":  3.0,   # 地支相冲 日冲旺相有气的静爻， 为暗动
+        "日冲散":   -2.5,   # 地支相冲 日冲动爻
+        "日建生合": 4.5,    # 地支相合， 且五行生爻的五行
+        "日建克合": -2.5,   # 地支克合， 且五行克爻的五行, 克中带合，衰而不死（比纯克轻）
+        "日建合起": 3.0,    # 地支相合，爻如果 休囚无气，就是合起，  判 “休囚 / 衰弱”：爻无月日生扶、四时休囚 / 死、十二长生为墓 / 绝
+        "日建合绊": -1.5,   # 地支相合，爻如果旺向有用， 就是合绊， 判 “旺相 / 有用”：爻得月日生扶、四时旺 / 相、十二长生为长生 / 帝旺，或本身是动爻
+        "日建生":   3.5,     # 日辰五行生爻的五行
+        "日建比和": 4.0,     # 五行相同但地支不同（如寅月卯木），帮扶力较弱 
+        "日建克":   -3.0,
+        "日建刑":   -2.0,
+        "日建害":   -1.0,
+        "日建无作用": 0.0,
+    }
+
+    def __post_init__(self):
+        '''
+        计算日建对爻的 生克冲合 作用及力量得分
+        '''
+        self._day_element = EarthlyBranch(self.day_branch).element
+        self._yao_element = EarthlyBranch(self.yao_branch).element
+        
+        if self.day_branch == self.yao_branch:
+            self.name = "临日建"
+        elif EarthlyBranch(self.day_branch).is_clashed_with(self.yao_branch):
+            self.name = "日破"
+        elif EarthlyBranch(self.day_branch).is_combined_with(self.yao_branch) and FiveElements(self._day_element).generates(self._yao_element):
+            self.name = "日建生合"
+        elif EarthlyBranch(self.day_branch).is_combined_with(self.yao_branch) and FiveElements(self._day_element).restrains(self._yao_element):
+            self.name = "日建克合"
+        elif FiveElements(self._day_element).generates(self._yao_element):
+            self.name = "日建生"
+        elif FiveElements(self._day_element).restrains(self._yao_element):
+            self.name = "日建克"
+        elif self._day_element == self._yao_element:
+            self.name = "日建比和"
+        elif EarthlyBranch(self.day_branch).is_combined_with(self.yao_branch):
+            self.name = "日建合起"  # 这里要算完所有的爻的旺衰状态， 再判断是否是合起，还是合绊
+        elif EarthlyBranch(self.day_branch).is_punished_with(self.yao_branch):
+            self.name = "日建刑"
+        elif EarthlyBranch(self.day_branch).is_harmed_with(self.yao_branch):
+            self.name = "日建害"
+        else:
+            self.name = "日建无作用"
+        self.score = self.MON_FORCE_TYPE.get(self.name, 0.0)
+
+    def get_source(self):
+        return "日建" + self.day_branch
+    def get_name(self):
+        return self.name
+    def get_score(self):
+        return self.score
+    def get_type(self):
+        return self.type
+
+
+@dataclass
+class ChangeForce(ForceInterface):
+    '''
+    变爻 对动爻 的作用力量类型 动爻受力作用, 本质是 变爻 对 动爻 的 “互动关系”
+    变爻是动爻的 “最终裁判”：先看变爻对动爻的生克冲合，再看变爻自身旺衰，最后判定动爻能否作用他爻。
+
+    无效变爻优先排除：回头克、化退、化绝、化破等情形，动爻直接作废，无需再看其他生克。
+
+    
+    '''
+    #构造函数
+    bianyao: GuaYao  # 变爻
+    dongyao: GuaYao  # 动爻
+    source: str = "变爻"
+    type: str = "变爻生克冲合刑害"
+    #下面的都是私有属性
+    _bianyao_branch: str = field(init=False, default="") # 变爻 地支
+    _dongyao_branch: str = field(init=False, default="") # 动爻 地支
+
+    _bianyao_element: str = field(init=False, default="") # 日建五行
+    _dongyao_element: str = field(init=False, default="")  # 爻五行
+
+    _bianyao_force_coeff: float = field(init=False, default=0.0)  # 变爻 作用系数 (范围是0-1， 就是把变爻的总力量映射到这个区间)
+    _xunkong_coeff: float = field(init=False, default=0.0)  # 旬空系数 (不空是1， 假空0.8, 真空0.2)
+
+    name: str | None = None  # 作用类型名称：例如化回头生 等
+    score: float = 0.0  # 作用力量：0.0-10.0
+
+    # 动爻化变类型及得分， 另外 动爻五行 在变爻的地支 所处的十二长生另外算
+    BIAN_FORCE_TYPE: ClassVar[dict[str, float]] = {
+        "化回头生":    4.5,     # 
+        "化进神":      4.0,       # 
+        "化回头生合":  3.0,     # 
+        "化回头克":   -4.5,
+        "化回头克合": -3.0,     # 
+        "化回头合":    2.0,     # 这种要注意，如果动爻旺相有气，就是合绊，减少动爻的力量; 如果动爻本身休囚无气，就是合起，增加动爻的力量，
+        "化退神":     -4.0,
+        "化回头冲":   -3.5,
+        "化回头刑":   -2.0,
+        "化回头害":   -1.0,
+        "化回头无作用": 0.0
+    }
+
+    # 旬空系数
+    XUNKONG_COEFF: ClassVar[dict[str, float]] = {
+        "不空": 1.0,
+        "假空": 0.8,
+        "真空": 0.0,
+    }
+
+    def __post_init__(self):
+        #先计算变爻的月日及旬空得分(范围[-13,13])， 然后把得分变成一个 有权系数范围[0-1]
+        # F月 + F月四时+ F月十二长生 + F日 + F日十二长生 总分范围是 [-13,13]
+        self._bianyao_force_coeff = self.bianyao.score / 26 + 0.5 # 从[-13,13] 映射到 [0,1]
+        
+        # 判断化变类型
+        if FiveElements(self.bianyao.element).generates(self.dongyao.element) and EarthlyBranch(self.bianyao.branch).is_combined_with(self.dongyao.branch):
+            self.name = "化回头生合"
+        elif FiveElements(self.bianyao.element).restrains(self.dongyao.element) and EarthlyBranch(self.bianyao.branch).is_combined_with(self.dongyao.branch):
+            self.name = "化回头克合"
+        if FiveElements(self.bianyao.element).generates(self.dongyao.element):
+            self.name = "化回头生"
+        elif FiveElements(self.bianyao.element).restrains(self.dongyao.element):
+            self.name = "化回头克"
+        elif EarthlyBranch.is_hua_jin(self.dongyao.branch, self.bianyao.branch):
+            self.name = "化进神"
+        elif EarthlyBranch.is_hua_tui(self.dongyao.branch, self.bianyao.branch):
+            self.name = "化退神"
+        elif EarthlyBranch(self.bianyao.branch).is_combined_with(self.dongyao.branch):
+            self.name = "化回头合"
+        elif EarthlyBranch(self.bianyao.branch).is_clashed_with(self.dongyao.branch):
+            self.name = "化回头冲"
+        elif EarthlyBranch(self.bianyao.branch).is_punished_with(self.dongyao.branch):
+            self.name = "化回头刑"
+        elif EarthlyBranch(self.bianyao.branch).is_harmed_with(self.dongyao.branch):
+            self.name = "化回头害"
+        else:
+            self.name = "化回头无作用"
+
+        self.score = self.BIAN_FORCE_TYPE.get(self.name, 0.0) * self._bianyao_force_coeff * ChangeForce.XUNKONG_COEFF[self.bianyao.xunkong_type]
+        # 计算几种特殊的类型：
+        # 如果变爻 被 日或月合住，就不会克动爻，这个时候分数为0
+        if ('合' in self.bianyao.get_month_force().get_name() or '合' in self.bianyao.get_day_force().get_name()) \
+                and self.name == "化回头克":
+            self.name = "化回头克，但是贪合忘克"
+            self.score = 0.0
+
+    def get_source(self):
+        return self.source
+    def get_name(self):
+        return self.name
+    def get_score(self):
+        return self.score
+    def get_type(self):
+        return self.type
+
+@dataclass
+class DongYaoForce(ForceInterface):
+    '''
+    动爻对 本卦的其他爻的作用力类型和大小。
+    动爻对用神的核心作用为生、克、冲、合、刑、害六大类，并结合化回头生 / 克、化进 / 化退等变爻关系，形成完整作用体系。
+    作用力类型：生克冲合， 作用力大小：0.0-10.0
+    '''
+    #构造函数
+    dongyao: GuaYao  # 动爻
+    targetyao: GuaYao  # 目标爻 (可能是 用神，世爻，应爻)
+    
+    source: str = "动爻"
+    type: str = "动爻生克冲合刑害"
+    #下面的都是私有属性
+    _dongyao_branch: str = field(init=False, default="") # 变爻 地支
+    _target_branch: str = field(init=False, default="") # 动爻 地支
+    _dongyao_element: str = field(init=False, default="") # 日建五行
+    _target_element: str = field(init=False, default="")  # 爻五行
+
+    # 动爻生克冲合得分，合 > 冲 > 生 > 比和 > 克 > 刑 > 害
+    DONG_FORCE_TYPE: ClassVar[dict[str, float]] = {
+        "动生合":  4.0,     # 又生又合
+        "动支相助": 4.0,  # 地支相同
+        "动生":    3.0,     # 
+        "动平合":  2.0,     # 无生无克只合；牵绊、绑定，吉带束缚
+        "动比和":  2.0,     # （五行相同帮扶）
+        "动害":   -1.0,     # 子未 / 丑午 / 寅巳 / 卯辰 / 申亥 / 酉戌相害； 主猜忌、小人、暗阻、小事不顺
+        "动刑":   -2.0,     # 
+        "动克":   -3.0,       # 
+        "动克合": -4.0,     #  比克更持久
+        "动冲":   -4.0,     # 
+        "动无作用": 0.0
+    }
+
+    def __post_init__(self):
+        self.source = self.dongyao.name + "动爻"
+        self._dongyao_branch = self.dongyao.branch
+        self._target_branch = self.targetyao.branch
+        self._dongyao_element = self.dongyao.element
+        self._target_element = self.targetyao.element
+
+        if EarthlyBranch(self._dongyao_branch).is_combined_with(self._target_branch):
+            if FiveElements(self._dongyao_element).generates(self._target_element):
+                self.name = "动生合"
+            elif FiveElements(self._dongyao_element).restrains(self._target_element):
+                self.name = "动克合"
+            else:
+                self.name = "动平合"
+        elif self._dongyao_branch == self._target_branch:
+            self.name = "动支相助"
+        elif self._dongyao_element == self._target_element:
+            self.name = "动比和"
+        elif EarthlyBranch(self._dongyao_branch).is_harmed_with(self._target_branch):
+            self.name = "动害"
+        elif EarthlyBranch(self._dongyao_branch).is_punished_with(self._target_branch):
+            self.name = "动刑"
+        elif FiveElements(self._dongyao_element).restrains(self._target_element):
+            self.name = "动克"
+        elif EarthlyBranch(self._dongyao_branch).is_clashed_with(self._target_branch):
+            self.name = "动冲"
+        else:
+            self.name = "动无作用"
+        
+        # F月 + F月四时+ F月十二长生 + F日 + F日十二长生 + 动爻 总分范围是 [-13,13]
+        self._dongyao_force_coeff = self.dongyao.score / 26 + 0.5 # 从[-13,13] 映射到 [0,1]
+
+        self.score = self.DONG_FORCE_TYPE.get(self.name, 0.0) * self._dongyao_force_coeff * ChangeForce.XUNKONG_COEFF[self.dongyao.xunkong_type]
+
+
+    def get_source(self):
+        return self.source
+    def get_name(self):
+        return self.name
+    def get_score(self):
+        return self.score
+    def get_type(self):
+        return self.type
+
+####################################################################
+def testGuaYao1():
+    guayao = GuaYao(1, 1, "子孙", "辰", "土")
+    print(guayao)
+def testGuaYao2():
+    guayao = GuaYao(6, 0, "子孙", "辰", "土")
+    print(guayao)
+
+if __name__ == '__main__':
+    testGuaYao1()
+    testGuaYao2()
