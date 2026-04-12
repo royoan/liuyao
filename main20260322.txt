@@ -115,7 +115,7 @@ class App:
                 yao.bianyao = self._biangua.yaos[idx]
 
     def __calculate_each_yao_month_day_force(self):
-        '''计算每个爻的日月及受力作用'''
+        '''计算每个爻(含变爻)的日月及受力作用'''
         for yao in self._bengua.yaos:
             yao.add_force(MonthForce(self._month_branch, yao.branch))
             yao.add_force(MonthSishiForce(self._month_branch, yao.branch))
@@ -130,8 +130,8 @@ class App:
                 bianyao.add_force(MonthForce(self._month_branch, bianyao.branch))
                 bianyao.add_force(MonthSishiForce(self._month_branch, bianyao.branch))
                 bianyao.add_force(ZhangshengForce(self._month_branch, bianyao.branch))
-                bianyao.add_force(DayForce(self._month_branch, bianyao.branch))
-                bianyao.add_force(ZhangshengForce(self._month_branch, bianyao.branch))
+                bianyao.add_force(DayForce(self._day_branch, bianyao.branch))
+                bianyao.add_force(ZhangshengForce(self._day_branch, bianyao.branch))
                 bianyao.xunkong = bianyao.branch in self._day_xunkong #是否旬空
 
     def __calculate_bianyao_true_false_empty(self):
@@ -271,9 +271,45 @@ class App:
 
         yongshen_score =self.analyze_yongshen()
         print(f"用神分数：{yongshen_score}")
-        print(f"吉凶：{'吉' if yongshen_score > 5 else '凶'}")
+        print("吉凶: ", end="")
+        if yongshen_score > 2:
+            print("吉")
+        elif yongshen_score > -1.99:
+            print("平")
+        else:
+            print("凶")
+
+        temp_print_bianyao = False
         for force in self.yongshen_yao.forces:
-            print(force.get_type(), force.get_source(), force.get_name(), force.get_score())
+            if force.get_source() == '变爻':
+                if not temp_print_bianyao:
+                    temp_print_bianyao = True
+                    print("\t", f"变爻{self.yongshen_yao.bianyao.liuqin}{self.yongshen_yao.bianyao.branch}分析：", f"总分({self.yongshen_yao.bianyao.score})",
+                          f"旬空类型({self.yongshen_yao.bianyao.xunkong_type})")
+                    for bianyao_force in self.yongshen_yao.bianyao.forces:
+                        # print("\t  ", bianyao_force.get_source(), bianyao_force.get_type(), bianyao_force.get_name(), bianyao_force.get_score())
+                        print("\t  ", self.pad(bianyao_force.get_source(), 8), self.pad(bianyao_force.get_type(), 18), self.pad(bianyao_force.get_name(), 12), bianyao_force.get_score())
+                # print("\t", force.get_source(), force.get_type(), force.get_name(), force.get_score(), f"变爻作用系数({force.get_desc()})")
+                print("\t", self.pad(force.get_source(), 8), self.pad(force.get_type(), 18), self.pad(force.get_name(), 12), force.get_score(), f"变爻作用系数({force.get_desc()})")
+            else:
+                #print("\t", force.get_source(), force.get_type(), force.get_name(), force.get_score())
+                #print("%s %-5s %-15s %-5s %d" % ("\t", force.get_source(), force.get_type(), force.get_name(), force.get_score()))
+                print("\t", self.pad(force.get_source(), 8), self.pad(force.get_type(), 18), self.pad(force.get_name(), 12), force.get_score())
+
+        print("动爻受力分析：")
+        for yao in self._bengua.yaos:
+            if yao.dongyao and not yao.yongshen:
+                print(f"{yao.name} {yao.liuqin}{yao.branch}{yao.element} 受力分析：总分({yao.score})")
+                for force in yao.forces:
+                    #print("\t", force.get_type(), force.get_source(), force.get_name(), force.get_score())
+                    print("\t", self.pad(force.get_source(), 8), self.pad(force.get_type(), 18), self.pad(force.get_name(), 12), force.get_score())
+                print(f"变爻{yao.bianyao.liuqin}{yao.bianyao.branch}受力分析：总分({yao.bianyao.score})")
+                for force in yao.bianyao.forces:
+                    #print("\t", force.get_type(), force.get_source(), force.get_name(), force.get_score())
+                    print("\t", self.pad(force.get_source(), 8), self.pad(force.get_type(), 18), self.pad(force.get_name(), 12), force.get_score())
+                print("---------")
+
+        self.analyze_yingyao()
 
     def analyze_yongshen(self):
         '''分析用神 受日月，动爻， 是否有变爻的影响'''
@@ -288,6 +324,15 @@ class App:
                 self.yongshen_yao.add_force(DongYaoForce(yao, self.yongshen_yao)) # 动爻对其他爻的作用力量：这里简化只考虑 生克冲合， 怎么计算？
 
         return self.yongshen_yao.score 
+
+    def analyze_yingyao(self):
+        '''分析应爻 受日月，动爻， 是否有变爻的影响'''
+        yingyao = next((yao for yao in self._bengua.yaos if yao.yingyao), None)
+        if not yingyao:
+            raise ValueError("没有应爻， 无法分析应爻")
+        # 先计算应爻是否 旬空， 真空还是假空（动不为空，有日建动爻动扶者，亦不为空；动而化空，伏而旺相皆不为空。月破为空，有气不动亦为空，伏而被克亦为空，真空为空。真空者，春土夏金秋是木，三冬逢火是真空。）
+
+
 
     def calc_yongshen_xunkong(self):
         '''
@@ -341,6 +386,27 @@ class App:
     def get_bengua(self):
         return self._bengua
 
+    def pad(self, words, width, align='left'):
+        '''中文的 格式化函数。指定宽度，并对齐字符串，空余用空格填充
+        例如： pad("中文", 5) 返回 "中文 ", 一个中文大约占2个字符宽度
+        '''
+        if align not in ('left', 'right'):
+            raise ValueError("align must be 'left' or 'right'")
+        
+        len_words = len(words)
+        if len_words*2 > width:
+            return words
+        # s = ''
+        # for i in range(width - 2 * len_words):
+        #     s += ' '
+
+        # if align == 'left':
+        #     return words + s
+        # elif align == 'right':
+        #     return s + words
+        blank_num = width - 2 * len_words
+        width = blank_num + len_words
+        return words.ljust(width, ' ') if align == 'left' else words.rjust(width, ' ')
 
 def main1():
     app = App("2026-03-11", "111011", [2,4], "妻财", "半导体基金159813最近涨跌情况") #早上9:15起卦 巳时
@@ -358,5 +424,13 @@ def main():
     app.analyze()  # 分析用神， 世爻，应爻的衰旺， 断吉凶， 分析应期
     # app.report()   #
 
+def main2():
+    app = App("2026-02-05", "111111", [3], "妻财", "半导体基金159813最近涨跌情况") #早上9:15起卦 巳时
+    print(app.get_month_ganzhi())
+    # print(app.get_bengua())
+    app.print_guahua()
+    app.analyze()  # 分析用神， 世爻，应爻的衰旺， 断吉凶， 分析应期
+
+
 if __name__ == '__main__':
-    main()
+    main1()
