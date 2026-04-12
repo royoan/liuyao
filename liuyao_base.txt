@@ -456,6 +456,7 @@ class GuaYao():
     branch: str  # 地支
     element: str  # 五行
 
+    name: str = field(init=False, default="")  # 爻的名称,例如初九， 六二， 上九
     shiyao: bool = field(init=False, default=False)      #是否 世爻
     yingyao: bool = field(init=False, default=False)    #是否 应爻
     yongshen: bool = field(init=False, default=False)   #是否 用神
@@ -499,7 +500,7 @@ class GuaYao():
 
     def add_force(self, force: ForceInterface):
         '''添加作用力'''
-        self.score += force.get_score()
+        self.score = round(self.score + force.get_score(), 2)
         self.forces.append(force)
 
     def get_score(self):
@@ -681,6 +682,9 @@ class ForceInterface(ABC):
     def get_score(self) -> float:
         """获取作用力量得分"""
         pass
+    def get_desc(self) -> str:
+        """获取作用描述"""
+        pass
 
 @dataclass
 class MonthForce(ForceInterface):
@@ -861,7 +865,7 @@ class ZhangshengForce(ForceInterface):
         self.score = self.ZHANGSHENG_FORCE_TYPE.get(self.name, 0.0)
 
     def get_source(self):
-        return self.source
+        return self.source + self.source_branch
     def get_name(self):
         return self.name
     def get_score(self):
@@ -1007,7 +1011,7 @@ class ChangeForce(ForceInterface):
             self.name = "化回头生合"
         elif FiveElements(self.bianyao.element).restrains(self.dongyao.element) and EarthlyBranch(self.bianyao.branch).is_combined_with(self.dongyao.branch):
             self.name = "化回头克合"
-        if FiveElements(self.bianyao.element).generates(self.dongyao.element):
+        elif FiveElements(self.bianyao.element).generates(self.dongyao.element):
             self.name = "化回头生"
         elif FiveElements(self.bianyao.element).restrains(self.dongyao.element):
             self.name = "化回头克"
@@ -1027,6 +1031,8 @@ class ChangeForce(ForceInterface):
             self.name = "化回头无作用"
 
         self.score = self.BIAN_FORCE_TYPE.get(self.name, 0.0) * self._bianyao_force_coeff * ChangeForce.XUNKONG_COEFF[self.bianyao.xunkong_type]
+        self.score = round(self.score, 2)
+        
         # 计算几种特殊的类型：
         # 如果变爻 被 日或月合住，就不会克动爻，这个时候分数为0
         if ('合' in self.bianyao.get_month_force().get_name() or '合' in self.bianyao.get_day_force().get_name()) \
@@ -1110,6 +1116,7 @@ class DongYaoForce(ForceInterface):
         self._dongyao_force_coeff = self.dongyao.score / 26 + 0.5 # 从[-13,13] 映射到 [0,1]
 
         self.score = self.DONG_FORCE_TYPE.get(self.name, 0.0) * self._dongyao_force_coeff * ChangeForce.XUNKONG_COEFF[self.dongyao.xunkong_type]
+        self.score = round(self.score, 2)
 
 
     def get_source(self):
