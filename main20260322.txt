@@ -153,7 +153,8 @@ class App:
             月破 或 日破
         '''
         for yao in self._bengua.yaos:
-            if yao.dongyao:
+            #只有在变爻旬空时候才需要判断是真空还是假空
+            if yao.dongyao and yao.bianyao.xunkong:
                 bianyao = yao.bianyao
                 month_force = bianyao.get_month_force()  # 月建 score >=3.5 分就满足，临月建，生，生合，比和
                 day_force = bianyao.get_day_force()  # 日建 score >=3.5 分就满足，临日建，生，生合，比和
@@ -270,7 +271,7 @@ class App:
     def analyze(self):
 
         yongshen_score =self.analyze_yongshen()
-        print(f"用神分数：{yongshen_score}")
+        print(f"用神{self.yongshen_yao.liuqin}{self.yongshen_yao.branch}{self.yongshen_yao.element}分数：{yongshen_score}")
         print("吉凶: ", end="")
         if yongshen_score > 2:
             print("吉")
@@ -433,4 +434,4 @@ def main2():
 
 
 if __name__ == '__main__':
-    main1()
+    main()
