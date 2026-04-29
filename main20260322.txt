@@ -119,7 +119,8 @@ class App:
         for yao in self._bengua.yaos:
             yao.add_force(MonthForce(self._month_branch, yao.branch))
             yao.add_force(MonthSishiForce(self._month_branch, yao.branch))
-            yao.add_force(ZhangshengForce(self._month_branch, yao.branch))
+            # 一般传统上不用看 爻 在月建上的十二长生，只要看日建即可。
+            #  yao.add_force(ZhangshengForce(self._month_branch, yao.branch))
             yao.add_force(DayForce(self._day_branch, yao.branch))
             yao.add_force(ZhangshengForce(self._day_branch, yao.branch, source='日辰'))
             
@@ -129,7 +130,7 @@ class App:
                 bianyao = yao.bianyao
                 bianyao.add_force(MonthForce(self._month_branch, bianyao.branch))
                 bianyao.add_force(MonthSishiForce(self._month_branch, bianyao.branch))
-                bianyao.add_force(ZhangshengForce(self._month_branch, bianyao.branch))
+                # bianyao.add_force(ZhangshengForce(self._month_branch, bianyao.branch))
                 bianyao.add_force(DayForce(self._day_branch, bianyao.branch))
                 bianyao.add_force(ZhangshengForce(self._day_branch, bianyao.branch))
                 bianyao.xunkong = bianyao.branch in self._day_xunkong #是否旬空
@@ -232,7 +233,9 @@ class App:
                 else:
                     # 如果都静，进入下一级筛选。
                     # 首选更旺的静爻， 或临世应的爻
-                    if yongshen_list[0].shiyao == 1 or yongshen_list[1].shiyao == 1:
+                    if yongshen_list[0].score > 7 or yongshen_list[1].score > 7:
+                        self.yongshen_yao = yongshen_list[0] if yongshen_list[0].score > yongshen_list[1].score else yongshen_list[1]
+                    elif yongshen_list[0].shiyao == 1 or yongshen_list[1].shiyao == 1:
                         print("有2个用神爻， 取 用神持世爻。 用神临世，代表所占之事与自身直接绑定、休戚相关，无论旺衰、动静、空破，优先级碾压所有其他用神，是唯一的核心用神")
                         self.yongshen_yao = yongshen_list[0] if yongshen_list[0].shiyao == 1 else yongshen_list[1]
                     elif yongshen_list[0].yingyao == 1 or yongshen_list[1].yingyao == 1:
@@ -269,7 +272,9 @@ class App:
         self.yongshen_yao.set_yongshen(True) if self.yongshen_yao else None
 
     def analyze(self):
-
+        '''
+        首先分析用神 受其他动爻的影响
+        '''
         yongshen_score =self.analyze_yongshen()
         print(f"用神{self.yongshen_yao.liuqin}{self.yongshen_yao.branch}{self.yongshen_yao.element}分数：{yongshen_score}")
         print("吉凶: ", end="")
@@ -280,6 +285,7 @@ class App:
         else:
             print("凶")
 
+        print("用神受力分析：")
         temp_print_bianyao = False
         for force in self.yongshen_yao.forces:
             if force.get_source() == '变爻':
@@ -297,9 +303,30 @@ class App:
                 #print("%s %-5s %-15s %-5s %d" % ("\t", force.get_source(), force.get_type(), force.get_name(), force.get_score()))
                 print("\t", self.pad(force.get_source(), 8), self.pad(force.get_type(), 18), self.pad(force.get_name(), 12), force.get_score())
 
+        print("---------")
+        print("世爻受力分析：")
+        self.analyze_shiyao()
+        for yao in self._bengua.yaos:
+            if yao.shiyao == 1 and not yao.yongshen:
+                print(f"{yao.name} {yao.liuqin}{yao.branch}{yao.element} 受力分析：总分({yao.score})")
+                for force in yao.forces:
+                    #print("\t", force.get_type(), force.get_source(), force.get_name(), force.get_score())
+                    print("\t", self.pad(force.get_source(), 8), self.pad(force.get_type(), 18), self.pad(force.get_name(), 12), force.get_score())
+                print("---------")
+
+        print("应爻受力分析：")
+        self.analyze_yingyao()
+        for yao in self._bengua.yaos:
+            if yao.yingyao == 1 and not yao.yongshen and not yao.shiyao:
+                print(f"{yao.name} {yao.liuqin}{yao.branch}{yao.element} 受力分析：总分({yao.score})")
+                for force in yao.forces:
+                    #print("\t", force.get_type(), force.get_source(), force.get_name(), force.get_score())
+                    print("\t", self.pad(force.get_source(), 8), self.pad(force.get_type(), 18), self.pad(force.get_name(), 12), force.get_score())
+                print("---------")
+
         print("动爻受力分析：")
         for yao in self._bengua.yaos:
-            if yao.dongyao and not yao.yongshen:
+            if yao.dongyao and not yao.yongshen and not yao.shiyao and not yao.yingyao:
                 print(f"{yao.name} {yao.liuqin}{yao.branch}{yao.element} 受力分析：总分({yao.score})")
                 for force in yao.forces:
                     #print("\t", force.get_type(), force.get_source(), force.get_name(), force.get_score())
@@ -311,13 +338,14 @@ class App:
                 print("---------")
 
         self.analyze_yingyao()
+        # 分析 用神， 世爻， 应爻的关系（例如： 用神临世， 用神临应， 世生用， 世克用， 应生用， 应克用，世生应，世克应， 应生世，应克世）
 
     def analyze_yongshen(self):
         '''分析用神 受日月，动爻， 是否有变爻的影响'''
         if not self.yongshen_yao:
             raise ValueError("没有用神， 无法分析用神")
         # 先计算用神是否 旬空， 真空还是假空（动不为空，有
-        self.calc_yongshen_xunkong()
+        self.calc_yao_xunkong(self.yongshen_yao)
 
         #先计算动爻对用神的影响
         for yao in self._bengua.yaos:
@@ -326,32 +354,53 @@ class App:
 
         return self.yongshen_yao.score 
 
+    def analyze_shiyao(self):
+        '''分析世爻 受动爻， 以及是否有变爻的影响'''
+        if self.shiyao.yongshen:
+            print("用神持世")
+            return
+        
+        self.calc_yao_xunkong(self.shiyao)
+        #先计算动爻对世爻的影响
+        for yao in self._bengua.yaos:
+            if yao.dongyao and yao.yao_index != self.shiyao.yao_index:
+                self.shiyao.add_force(DongYaoForce(yao, self.shiyao)) # 动爻对其他爻的作用力量：这里简化只考虑 生克冲合， 怎么计算？
+
+        return self.shiyao.score 
+
     def analyze_yingyao(self):
         '''分析应爻 受日月，动爻， 是否有变爻的影响'''
-        yingyao = next((yao for yao in self._bengua.yaos if yao.yingyao), None)
-        if not yingyao:
-            raise ValueError("没有应爻， 无法分析应爻")
+        if self.yingyao.yongshen:
+            print("用神持应")
+            return
         # 先计算应爻是否 旬空， 真空还是假空（动不为空，有日建动爻动扶者，亦不为空；动而化空，伏而旺相皆不为空。月破为空，有气不动亦为空，伏而被克亦为空，真空为空。真空者，春土夏金秋是木，三冬逢火是真空。）
+        self.calc_yao_xunkong(self.yingyao)
+        for yao in self._bengua.yaos:
+            if yao.dongyao and yao.yao_index != self.yingyao.yao_index:
+                self.yingyao.add_force(DongYaoForce(yao, self.yingyao)) # 动爻对其他爻的作用力量：这里简化只考虑 生克冲合， 怎么计算？
 
-
-
-    def calc_yongshen_xunkong(self):
+    def calc_yao_xunkong(self, yao: GuaYao):
         '''
-        计算用神是否 旬空， 真空还是假空
+        计算爻是否 旬空， 真空还是假空
         增删：旺不为空；动不为空；有日建动爻动扶者，亦不为空；动而化空，伏而旺相皆不为空。月破为空，有气不动亦为空，伏而被克亦为空，真空为空。真空者，春土夏金秋是木，三冬逢火是真空。
+
+        注意理解：真空者，春土夏金秋是木，三冬逢火是真空。
+        这句 只说了 春天（寅卯木） 克 土，所以五行为土的静爻遇到旬空，就是真空，其他类推，
+        但是后世理法逻辑： 只要 静爻的五行 在月建上 是囚，或死 ，遇到旬空就是真空。 所以不用死扣《增删》的原文。
         '''
-        if self.yongshen_yao.branch in self._day_xunkong:
+        if yao.branch in self._day_xunkong:
             # 旬空
-            self.yongshen_yao.set_xunkong(True)
-            if self.yongshen_yao.get_month_force().get_name() == "月破":
-                # 月破， 旬空为 真空
-                self.yongshen_yao.set_xunkong_type('真空')
-            elif self.yongshen_yao.get_score() > 5:
-                self.yongshen_yao.set_xunkong_type('假空') #TODO 假空条件待完善
+            yao.set_xunkong(True)
+            if yao.dongyao:
+                yao.set_xunkong_type('假空')
+            elif yao.get_score() > 5:
+                yao.set_xunkong_type('假空') #TODO 假空条件待完善
             else:
-                self.yongshen_yao.set_xunkong_type('真空')
+                yao.set_xunkong_type('真空')
         else:
-            self.yongshen_yao.set_xunkong(False)
+            yao.set_xunkong(False)
+
+
 
     def print_guahua(self):
         '''打印整个卦画， 含所测事项，起卦干支，旬空，本卦，变卦'''
@@ -431,7 +480,34 @@ def main2():
     # print(app.get_bengua())
     app.print_guahua()
     app.analyze()  # 分析用神， 世爻，应爻的衰旺， 断吉凶， 分析应期
+def main3():
+    app = App("2026-04-14", "001001", [], "妻财", "问股票中国平安601318 目前空仓近期涨跌如何") #早上9:35起卦 巳时
+    print(app.get_month_ganzhi())
+    # print(app.get_bengua())
+    app.print_guahua()
+    app.analyze()  # 分析用神， 世爻，应爻的衰旺， 断吉凶， 分析应期
 
+def main4():
+    app = App("2026-04-17", "000111", [4], "父母", "问妻舅肝部病情如何") #早上9:18起卦 巳时
+    print(app.get_month_ganzhi())
+    # print(app.get_bengua())
+    app.print_guahua()
+    app.analyze()  # 分析用神， 世爻，应爻的衰旺， 断吉凶， 分析应期
+
+def main5():
+    app = App("2026-04-21", "100001", [], "妻财", "问股票长江电力6009000目前空仓近期涨跌如何") #晚上10:45起卦 巳时
+    print(app.get_month_ganzhi())
+    # print(app.get_bengua())
+    app.print_guahua()
+    app.analyze()  # 分析用神， 世爻，应爻的衰旺， 断吉凶， 分析应期
+
+def main6():
+    app = App("2026-04-29", "010010", [2], "妻财", "问股票中国石化 600028目前空仓近期涨跌如何") #早上9:45起卦
+    print(app.get_month_ganzhi())
+    # print(app.get_bengua())
+    app.print_guahua()
+    app.analyze()  # 分析用神， 世爻，应爻的衰旺， 断吉凶， 分析应期
 
 if __name__ == '__main__':
-    main()
+    # main5()
+    main6()
